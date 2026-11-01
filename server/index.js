@@ -638,10 +638,10 @@ app.post("/api/invoices/:id/send", async (req, res) => {
 
 if (process.env.NODE_ENV === "production") {
   app.use(express.static(path.join(__dirname, "../dist")));
-  app.get("*", (_req, res) =>
+  app.get("/{*splat}", (_req, res) =>
     res.sendFile(path.join(__dirname, "../dist/index.html")),
   );
 }
-app.listen(port, () =>
+app.listen(port, '0.0.0.0', () =>
   console.log(`Invoice API running on http://localhost:${port}`),
 );
