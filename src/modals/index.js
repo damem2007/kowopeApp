@@ -1,4 +1,4 @@
-import { state as S } from '../modules/store.js'
+import { state } from '../modules/store.js'
 import { businessModal } from './business.js'
 import { currencyModal } from './currency.js'
 import { pastInvoiceModal } from './pastInvoice.js'
@@ -7,7 +7,7 @@ import { newClientModal, clientEditModal } from './client.js'
 import { recordPaymentModal } from './payment.js'
 
 export function modal() {
-  const m = S.activeModal
+  const m = state.activeModal
   if (m === "clientEdit") return clientEditModal()
   if (m === "biz") return businessModal()
   if (m === "cur") return currencyModal()

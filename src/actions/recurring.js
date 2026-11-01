@@ -1,55 +1,101 @@
-import { state as S } from '../modules/store.js'
-import { today as T, formatDate as D, addDays as addD, addMonths as addM, stepFrequency as stepF } from '../modules/date.js'
+import { state } from '../modules/store.js'
+import { today, formatDate, addDays, addMonths, stepFrequency } from '../modules/date.js'
 import { $ } from '../modules/selectors.js'
 import { formatMoney } from '../modules/format.js'
 import { isMail } from '../modules/selectors.js'
 import { hdates, svFrom } from '../modules/recurrence.js'
 import { render, toast } from '../ui/render.js'
 
-export const runRec = x => {
-  const r = S.recurringServices[x]
-  if (r.chg && r.chg.from <= r.next) { r.prev = r.a; r.a = r.chg.a; r.chg = null }
-  const id = "INV-000" + (S.invoices.length + 1)
-  S.invoices.push({ id, c: r.c, a: r.a, due: addD(T, 30), s: r.auto && isMail() ? "Sent" : "Draft", rec: 1 })
-  r.next = stepF(r.next, r.f, 1)
-  toast(id + " created from schedule")
+export const runRec = async recurringIndex => {
+  const recurringService = state.recurringServices[recurringIndex]
+  if (recurringService.chg && recurringService.chg.from <= recurringService.next) { recurringService.prev = recurringService.a; recurringService.a = recurringService.chg.a; recurringService.chg = null }
+  try {
+    const response = await fetch('/api/invoices', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clientId: state.clientIds[recurringService.c], description: recurringService.d || 'Recurring service', amount: recurringService.a, dueDate: addDays(today, 30), currency: recurringService.cur || state.defaultCurrency, paymentInstructions: recurringService.n || '', lineItems: [{ description: recurringService.d || 'Recurring service', quantity: 1, unitPrice: recurringService.a }] }) })
+    const savedInvoice = await response.json()
+    if (!response.ok) throw new Error(savedInvoice.error || 'Unable to create recurring invoice')
+    recurringService.next = stepFrequency(recurringService.next, recurringService.f, 1)
+    if (recurringService.id) await fetch(`/api/recurring/${recurringService.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ nextRunAt: recurringService.next }) })
+    state.invoices.push({ id: savedInvoice.number, c: recurringService.c, a: Number(savedInvoice.amount), due: savedInvoice.due_date || '', s: savedInvoice.status || 'Draft', rec: 1, cur: savedInvoice.currency || 'USD', n: savedInvoice.payment_instructions || '' })
+    toast(savedInvoice.number + " created from schedule")
+  } catch (error) { toast(error.message) }
 }
 
-export const mrs = () => { const f = $("#mf").value, n = $("#mrd").value; $("#mrp").textContent = n ? "Next 3 invoices: " + [0, 1, 2].map(k => D(stepF(n, f, k))).join(", ") : "" }
+export const mrs = () => { const frequency = $("#mf").value, nextDate = $("#mrd").value; $("#mrp").textContent = nextDate ? "Next 3 invoices: " + [0, 1, 2].map(offset => formatDate(stepFrequency(nextDate, frequency, offset))).join(", ") : "" }
 
-export const saveRec = () => {
-  const i = S.invoices.find(x => x.id === S.mr), f = $("#mf").value, n = $("#mrd").value, e = m => ($("#mre").textContent = m)
-  if (!n) return e("Pick the date of the first new invoice.")
-  if (n <= T) return e("Choose a date after today.")
-  S.recurringServices.push({ c: i.c, a: +$("#ma").value || i.a, prev: +$("#ma").value && +$("#ma").value !== i.a ? i.a : 0, f, next: n, st: "Active", auto: $("#mau").checked ? 1 : 0, src: i.id })
-  i.rec = 1; S.activeModal = null
-  toast("Recurring schedule created. Next invoice on " + D(n))
+export const saveRec = async () => {
+  const sourceInvoice = state.invoices.find(invoice => invoice.id === state.mr), frequency = $("#mf").value, nextDate = $("#mrd").value, showError = message => ($("#mre").textContent = message)
+  if (!nextDate) return showError("Pick the date of the first new invoice.")
+  if (nextDate <= today) return showError("Choose a date after today.")
+  try {
+    const sourceResponse = await fetch(`/api/invoices/${encodeURIComponent(sourceInvoice.id)}`)
+    const sourceDetails = await sourceResponse.json()
+    if (!sourceResponse.ok) throw new Error(sourceDetails.error || 'Unable to load source invoice')
+    const response = await fetch('/api/recurring', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clientId: state.clientIds[sourceInvoice.c], description: sourceInvoice.d || sourceDetails.description || 'Recurring service', amount: +$("#ma").value || sourceInvoice.a, frequency, nextRunAt: nextDate, currency: sourceInvoice.cur || state.defaultCurrency, autoSend: $("#mau").checked ? 1 : 0, sourceInvoiceId: sourceDetails.id }) })
+    const savedSchedule = await response.json()
+    if (!response.ok) throw new Error(savedSchedule.error || 'Unable to create recurring schedule')
+    state.recurringServices.push({ id: savedSchedule.id, c: sourceInvoice.c, a: Number(savedSchedule.amount || $("#ma").value || sourceInvoice.a), d: sourceInvoice.d || 'Recurring service', f: frequency, next: nextDate, st: 'Active', auto: savedSchedule.auto_send, src: sourceInvoice.id })
+    sourceInvoice.rec = 1; state.activeModal = null
+    toast("Recurring schedule created. Next invoice on " + formatDate(nextDate))
+  } catch (error) { toast(error.message) }
 }
 
-export const saveChg = () => {
-  const r = S.recurringServices[S.cr], a = +$("#ca2").value, f = $("#cf").value, e = m => ($("#ce2").textContent = m)
-  if (!(a > 0)) return e("Enter the new amount.")
-  if (!f || f <= T) return e("Choose a date after today.")
-  r.chg = { from: f, a }; S.activeModal = null
-  toast("Price changes to " + formatMoney(a) + " from " + D(f))
+export const saveChg = async () => {
+  const recurringService = state.recurringServices[state.cr], newAmount = +$("#ca2").value, effectiveDate = $("#cf").value, showError = message => ($("#ce2").textContent = message)
+  if (!(newAmount > 0)) return showError("Enter the new amount.")
+  if (!effectiveDate || effectiveDate <= today) return showError("Choose a date after today.")
+  try {
+    if (!recurringService.id) throw new Error('This recurring schedule has not been saved yet.')
+    const response = await fetch(`/api/recurring/${recurringService.id}/price`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ amount: newAmount, effectiveFrom: effectiveDate }) })
+    const savedPriceChange = await response.json()
+    if (!response.ok) throw new Error(savedPriceChange.error || 'Unable to save price change')
+    recurringService.chg = { from: effectiveDate, a: newAmount }; state.activeModal = null
+    toast("Price changes to " + formatMoney(newAmount) + " from " + formatDate(effectiveDate))
+  } catch (error) { showError(error.message) }
 }
 
-export const svNew = c => { S.sv = { c: c === undefined ? "" : c, d: "", f: "Monthly", hist: 1, n: 3, a: 550, start: addM(T, -3), na: 660, from: "", auto: 0, note: 0, s: 0, err: "" }; S.currentRoute = "svc"; render(); scrollTo(0, 0) }
+export const toggleRecurring = async recurringIndex => {
+  const recurringService = state.recurringServices[recurringIndex]
+  if (!recurringService?.id) return toast('This recurring schedule is not saved in the database.')
+  const nextStatus = recurringService.st === 'Active' ? 'paused' : 'active'
+  const response = await fetch(`/api/recurring/${recurringService.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: nextStatus }) })
+  const savedSchedule = await response.json()
+  if (!response.ok) return toast(savedSchedule.error || 'Unable to update recurring schedule')
+  recurringService.st = nextStatus === 'active' ? 'Active' : 'Paused'
+  toast(`Recurring schedule ${recurringService.st.toLowerCase()}`)
+}
+
+export const svNew = c => { state.sv = { c: c === undefined ? "" : c, d: "", f: "Monthly", hist: 1, n: 3, a: 550, start: addMonths(today, -3), na: 660, from: "", auto: 0, note: 0, s: 0, err: "" }; state.currentRoute = "svc"; render(); scrollTo(0, 0) }
 
 export const svNext = () => {
-  const v = S.sv, l = hdates(v); v.err = ""
-  if (v.s === 0 && (v.c === "" || !v.d.trim())) v.err = "Choose a client and describe the service."
-  else if (v.s === 1 && v.hist) { if (!(v.n >= 1 && v.n <= 36) || !(v.a > 0) || !v.start) v.err = "Enter how many invoices, the amount each and the first invoice date."; else if (l[l.length - 1] > T) v.err = "Past invoices cannot be dated in the future." }
-  else if (v.s === 2) { if (!(v.na > 0)) v.err = "Enter the price for new invoices."; else if (!v.from || v.from < T || (v.hist && v.from <= l[l.length - 1])) v.err = "The first new invoice must be today or later, and after your last past invoice." }
-  if (v.err) return render()
-  if (v.s === 3) return svSave()
-  v.s++; if (v.s === 2) v.from = svFrom(v); render()
+  const serviceState = state.sv, historicalDates = hdates(serviceState); serviceState.err = ""
+  if (serviceState.s === 0 && (serviceState.c === "" || !serviceState.d.trim())) serviceState.err = "Choose a client and describe the service."
+  else if (serviceState.s === 1 && serviceState.hist) { if (!(serviceState.n >= 1 && serviceState.n <= 36) || !(serviceState.a > 0) || !serviceState.start) serviceState.err = "Enter how many invoices, the amount each and the first invoice date."; else if (historicalDates[historicalDates.length - 1] > today) serviceState.err = "Past invoices cannot be dated in the future." }
+  else if (serviceState.s === 2) { if (!(serviceState.na > 0)) serviceState.err = "Enter the price for new invoices."; else if (!serviceState.from || serviceState.from < today || (serviceState.hist && serviceState.from <= historicalDates[historicalDates.length - 1])) serviceState.err = "The first new invoice must be today or later, and after your last past invoice." }
+  if (serviceState.err) return render()
+  if (serviceState.s === 3) return svSave()
+  serviceState.s++; if (serviceState.s === 2) serviceState.from = svFrom(serviceState); render()
 }
 
-export const svSave = () => {
-  const v = S.sv, c = +v.c; let last
-  hdates(v).forEach(d => { const id = "INV-000" + (S.invoices.length + 1); S.invoices.unshift({ id, c, a: +v.a, iss: d, due: d, s: "Paid", old: 1, d: v.d }); S.payments.push({ d, inv: id, c, m: "Manual", a: +v.a }); last = id })
-  S.recurringServices.push({ c, a: +v.na, f: v.f, next: v.from, st: "Active", auto: v.auto, src: last, prev: v.hist && +v.na !== +v.a ? +v.a : 0 })
-  S.sv = null; S.currentRoute = "invoices"; S.activeInvoiceTab = "Recurring"
-  toast("Recurring service created. Next invoice on " + D(v.from))
+export const svSave = async () => {
+  const serviceState = state.sv, clientIndex = +serviceState.c, clientId = state.clientIds[clientIndex]
+  try {
+    let lastInvoice
+    for (const issueDate of hdates(serviceState)) {
+      const invoiceResponse = await fetch('/api/invoices', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clientId, description: serviceState.d, amount: +serviceState.a, dueDate: issueDate, issueDate, isPast: true, currency: state.defaultCurrency, lineItems: [{ description: serviceState.d, quantity: 1, unitPrice: +serviceState.a }] }) })
+      const savedInvoice = await invoiceResponse.json()
+      if (!invoiceResponse.ok) throw new Error(savedInvoice.error || 'Unable to save historical invoice')
+      const paymentResponse = await fetch('/api/payments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ invoiceId: savedInvoice.number, method: 'Manual', date: issueDate, amount: +serviceState.a }) })
+      const savedPayment = await paymentResponse.json()
+      if (!paymentResponse.ok) throw new Error(savedPayment.error || 'Unable to save historical payment')
+      state.invoices.unshift({ id: savedInvoice.number, c: clientIndex, a: Number(savedInvoice.amount), iss: issueDate, due: issueDate, s: 'Paid', old: 1, d: serviceState.d, cur: savedInvoice.currency || state.defaultCurrency })
+      state.payments.push({ d: savedPayment.date, inv: savedInvoice.number, c: clientIndex, m: savedPayment.method || 'Manual', a: Number(savedPayment.amount) })
+      lastInvoice = savedInvoice
+    }
+    const scheduleResponse = await fetch('/api/recurring', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clientId, description: serviceState.d, amount: +serviceState.na, frequency: serviceState.f, nextRunAt: serviceState.from, currency: state.defaultCurrency, autoSend: serviceState.auto, sourceInvoiceId: lastInvoice?.id || null }) })
+    const savedSchedule = await scheduleResponse.json()
+    if (!scheduleResponse.ok) throw new Error(savedSchedule.error || 'Unable to save recurring service')
+    state.recurringServices.push({ id: savedSchedule.id, c: clientIndex, a: +serviceState.na, d: serviceState.d, f: serviceState.f, next: savedSchedule.next_run_at, st: 'Active', auto: savedSchedule.auto_send, src: lastInvoice?.number || '' })
+    state.sv = null; state.currentRoute = 'invoices'; state.activeInvoiceTab = 'Recurring'
+    toast('Recurring service created. Next invoice on ' + formatDate(serviceState.from))
+  } catch (error) { toast(error.message) }
 }

@@ -1,23 +1,52 @@
-import { state as S } from './store.js'
-import { providers as P } from './catalog.js'
+import { state } from './store.js'
+import { providers, currencySigns, currencyNames } from './catalog.js'
 import { render } from '../ui/render.js'
 
 export async function bootLedgerly() {
+  const authResponse = await fetch('/api/auth/status')
+  const authStatus = await authResponse.json()
+  state.allowSignup = authStatus.allowSignup
+  if (!authStatus.authenticated) { state.authenticated = false; state.currentRoute = 'login'; render(); return }
+  state.authenticated = true
+  const defaultIntegrations = Object.fromEntries(Object.keys(providers).map(providerId => [providerId, { on: false, acct: '' }]))
   try {
-    const [clientResponse, invoiceResponse, profileResponse, integrationResponse] = await Promise.all([fetch('/api/clients'), fetch('/api/invoices'), fetch('/api/business-profile'), fetch('/api/integrations')])
-    const clients = await clientResponse.json()
-    const invoices = await invoiceResponse.json()
-    const profile = await profileResponse.json()
-    const integrationRecords = await integrationResponse.json()
-    S.clientNames = clients.map(client => client.name)
-    S.clientIds = clients.map(client => client.id)
-    S.clientDetails = clients.map(client => ({ e: client.email, p: client.phone || '', a: client.address || '' }))
-    S.invoices = invoices.map(invoice => ({ id: invoice.number, c: Math.max(0, clients.findIndex(client => client.id === invoice.client_id)), a: Number(invoice.amount), due: invoice.due_date || '', s: invoice.status, rec: false, cur: invoice.currency || 'USD', n: invoice.payment_instructions || '' }))
-    S.businessProfiles = profile.name ? [{ n: profile.name, a: profile.address || '', e: profile.email || '', p: profile.phone || '' }] : [{ n: 'Your business', a: '', e: '', p: '' }]
-    const connected = Object.fromEntries(integrationRecords.map(record => [record.provider, { on: record.status === 'connected', acct: record.account_label || '' }]))
-    S.integrations = Object.fromEntries(Object.keys(P).map(provider => [provider, connected[provider] || { on: false, acct: '' }]))
+    const responses = await Promise.allSettled(['/api/clients', '/api/invoices', '/api/business-profile', '/api/integrations', '/api/payments', '/api/recurring', '/api/currencies'].map(endpoint => fetch(endpoint)))
+    const parseJsonResponse = async (response, endpoint) => {
+      const responseType = response.headers.get('content-type') || ''
+      if (!response.ok || !responseType.includes('application/json')) throw new Error(`${endpoint} returned ${response.status} ${responseType || 'non-JSON response'}`)
+      return response.json()
+    }
+    const readResponse = async (responseResult, endpoint, fallback) => responseResult.status === 'fulfilled' ? parseJsonResponse(responseResult.value, endpoint).catch(error => { console.error(`Ledgerly API request failed: ${endpoint}`, error); return fallback }) : (console.error(`Ledgerly API request failed: ${endpoint}`, responseResult.reason), fallback)
+    const [clients, invoices, businessProfile, integrationRecords, paymentRecords, recurringRecords, currencies] = await Promise.all([
+      readResponse(responses[0], '/api/clients', []),
+      readResponse(responses[1], '/api/invoices', []),
+      readResponse(responses[2], '/api/business-profile', {}),
+      readResponse(responses[3], '/api/integrations', []),
+      readResponse(responses[4], '/api/payments', []),
+      readResponse(responses[5], '/api/recurring', []),
+      readResponse(responses[6], '/api/currencies', []),
+    ])
+    currencies.forEach(currency => { currencySigns[currency.code] = currency.sign; currencyNames[currency.code] = currency.name })
+    state.defaultCurrency = businessProfile.default_currency || 'USD'
+    state.clientNames = clients.map(clientRecord => clientRecord.name)
+    state.clientIds = clients.map(clientRecord => clientRecord.id)
+    state.clientDetails = clients.map(clientRecord => ({ e: clientRecord.email, p: clientRecord.phone || '', a: clientRecord.address || '' }))
+    state.invoices = invoices.map(invoiceRecord => ({ id: invoiceRecord.number, c: Math.max(0, clients.findIndex(clientRecord => clientRecord.id === invoiceRecord.client_id)), a: Number(invoiceRecord.amount), due: invoiceRecord.due_date || '', s: invoiceRecord.status, rec: false, cur: invoiceRecord.currency || 'USD', n: invoiceRecord.payment_instructions || '' }))
+    state.payments = paymentRecords.map(paymentRecord => ({ d: paymentRecord.date, inv: paymentRecord.invoice_number || paymentRecord.invoice_id, c: Math.max(0, clients.findIndex(clientRecord => clientRecord.id === paymentRecord.client_id)), m: paymentRecord.method || paymentRecord.source || 'Manual', a: Number(paymentRecord.amount) }))
+    state.recurringServices = recurringRecords.map(scheduleRecord => ({ id: scheduleRecord.id, c: Math.max(0, clients.findIndex(clientRecord => clientRecord.id === scheduleRecord.client_id)), a: Number(scheduleRecord.current_amount || 0), d: scheduleRecord.description, f: scheduleRecord.frequency, next: scheduleRecord.next_run_at, st: scheduleRecord.status === 'active' ? 'Active' : 'Paused', auto: scheduleRecord.auto_send, src: scheduleRecord.source_invoice_id }))
+    state.businessProfiles = businessProfile.name ? [{ n: businessProfile.name, a: businessProfile.address || '', e: businessProfile.email || '', p: businessProfile.phone || '', paymentInstructions: businessProfile.payment_instructions || '', invoicePrefix: businessProfile.invoice_prefix || 'INV-', invoicePadding: businessProfile.invoice_number_padding || 4, invoiceFormat: businessProfile.invoice_number_format || '{PREFIX}{YYYY}-{NUMBER}', preferredEmailProvider: businessProfile.preferred_email_provider || '' }] : [{ n: 'Your business', a: '', e: '', p: '', paymentInstructions: '', invoicePrefix: 'INV-', invoicePadding: 4, invoiceFormat: '{PREFIX}{YYYY}-{NUMBER}', preferredEmailProvider: '' }]
+    const connectedIntegrations = Object.fromEntries(integrationRecords.map(integrationRecord => [integrationRecord.provider, { on: integrationRecord.status === 'connected', acct: integrationRecord.account_label || '', config: (() => { try { return JSON.parse(integrationRecord.config_json || '{}') } catch { return {} } })() }]))
+    state.integrations = Object.fromEntries(Object.keys(providers).map(providerId => [providerId, connectedIntegrations[providerId] || { on: false, acct: '' }]))
   } catch (error) {
     console.error('Ledgerly API bootstrap failed', error)
+    state.clientNames = state.clientNames || []
+    state.clientIds = state.clientIds || []
+    state.clientDetails = state.clientDetails || []
+    state.invoices = state.invoices || []
+    state.payments = state.payments || []
+    state.recurringServices = state.recurringServices || []
+    state.businessProfiles = state.businessProfiles?.length ? state.businessProfiles : [{ n: 'Your business', a: '', e: '', p: '' }]
+    state.integrations = defaultIntegrations
   }
   render()
 }

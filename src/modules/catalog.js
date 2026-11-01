@@ -7,6 +7,7 @@ export const currencyNames = {
 export const providers = {
   gmail: ["Google Gmail", "Email delivery", "G", "#d44638"],
   outlook: ["Microsoft Outlook", "Email delivery", "O", "#1670c4"],
+  mailjet: ["Mailjet", "Email delivery", "M", "#1d9bf0"],
   stripe: ["Stripe", "Online payments", "S", "#635bff"],
   qb: ["QuickBooks", "Accounting sync", "QB", "#2c9f3c"],
 };

@@ -1,4 +1,4 @@
-import { state as S } from '../modules/store.js'
+import { state } from '../modules/store.js'
 import { $ } from '../modules/selectors.js'
 import { shell } from './layout.js'
 import { overview } from '../pages/overview.js'
@@ -12,11 +12,13 @@ import { prevP } from '../pages/preview.js'
 import { service } from '../pages/service.js'
 import { wizView } from '../modals/integrationWizard.js'
 import { modal } from '../modals/index.js'
+import { login } from '../pages/login.js'
 
-export const go = (r, t) => { S.currentRoute = r; if (t) S.activeInvoiceTab = t; S.searchQuery = ""; S.openMenuIndex = 0; S.invoiceEditor = null; render(); scrollTo(0, 0) }
-export const toast = (m, u) => { S.toast = { m, u }; render(); clearTimeout(S.tt); S.tt = setTimeout(() => { S.toast = null; render() }, 5000) }
+export const go = (route, invoiceTab) => { state.currentRoute = route; if (invoiceTab) state.activeInvoiceTab = invoiceTab; state.searchQuery = ""; state.openMenuIndex = 0; state.invoiceEditor = null; render(); scrollTo(0, 0) }
+export const toast = (message, undo) => { state.toast = { m: message, u: undo }; render(); clearTimeout(state.tt); state.tt = setTimeout(() => { state.toast = null; render() }, 5000) }
 
 export function render() {
-  const pg = { overview, invoices, clients, payments, integrations, settings, new: editor, preview: prevP, svc: service }[S.currentRoute]()
-  $("#root").innerHTML = shell(pg) + (S.integrationWizard ? wizView() : "") + (S.activeModal ? modal() : "") + (S.toast ? `<div class="toast" role="status">${S.toast.m}${S.toast.u ? `<button onclick="S.toast.u()">Undo</button>` : ""}</div>` : "")
+  if (state.currentRoute === 'login') { $("#root").innerHTML = login(); return }
+  const pg = { overview, invoices, clients, payments, integrations, settings, new: editor, preview: prevP, svc: service }[state.currentRoute]()
+  $("#root").innerHTML = shell(pg) + (state.integrationWizard ? wizView() : "") + (state.activeModal ? modal() : "") + (state.toast ? `<div class="toast" role="status">${state.toast.m}${state.toast.u ? `<button onclick="state.toast.u()">Undo</button>` : ""}</div>` : "")
 }

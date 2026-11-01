@@ -1,7 +1,7 @@
-import { state as S } from './store.js'
-import { today as T } from './date.js'
+import { state } from './store.js'
+import { today } from './date.js'
 
 export const $ = selector => document.querySelector(selector)
-export const st = i => i.s === "Sent" && i.due < T ? "Overdue" : i.s
-export const sum = f => S.invoices.filter(f).reduce((a, i) => a + i.a, 0)
-export const isMail = () => S.integrations.gmail.on || S.integrations.outlook.on
+export const invoiceStatus = invoice => invoice.s === "Sent" && invoice.due < today ? "Overdue" : invoice.s
+export const sum = invoiceFilter => state.invoices.filter(invoiceFilter).reduce((total, invoice) => total + invoice.a, 0)
+export const isMail = () => state.integrations.gmail.on || state.integrations.outlook.on || state.integrations.mailjet?.on

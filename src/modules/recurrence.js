@@ -1,5 +1,5 @@
-import { today as T, stepFrequency as stepF } from './date.js'
+import { today, stepFrequency } from './date.js'
 
-export const nextOn = (i, f) => { const b = i.iss || i.due; let k = 1; while (stepF(b, f, k) <= T) k++; return stepF(b, f, k) }
-export const hdates = v => v.hist ? [...Array(v.n).keys()].map(k => stepF(v.start, v.f, k)) : []
-export const svFrom = v => { let k = v.hist ? v.n : 0; const b = v.hist ? v.start : T; while (stepF(b, v.f, k) < T) k++; return stepF(b, v.f, k) }
+export const nextOn = (invoice, frequency) => { const baseDate = invoice.iss || invoice.due; let occurrenceIndex = 1; while (stepFrequency(baseDate, frequency, occurrenceIndex) <= today) occurrenceIndex++; return stepFrequency(baseDate, frequency, occurrenceIndex) }
+export const hdates = serviceState => serviceState.hist ? [...Array(serviceState.n).keys()].map(invoiceOffset => stepFrequency(serviceState.start, serviceState.f, invoiceOffset)) : []
+export const svFrom = serviceState => { let occurrenceIndex = serviceState.hist ? serviceState.n : 0; const baseDate = serviceState.hist ? serviceState.start : today; while (stepFrequency(baseDate, serviceState.f, occurrenceIndex) < today) occurrenceIndex++; return stepFrequency(baseDate, serviceState.f, occurrenceIndex) }

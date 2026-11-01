@@ -16,5 +16,9 @@ export const state = {
   openMenuIndex: 0,
   defaultCurrency: "USD",
   clientIds: [],
+  authenticated: false,
+  authSetupRequired: false,
+  allowSignup: false,
+  authMode: 'login',
 };
 

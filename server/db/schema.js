@@ -30,9 +30,21 @@ CREATE TABLE IF NOT EXISTS business_profile (
   address TEXT NOT NULL DEFAULT '',
   email TEXT NOT NULL DEFAULT '',
   phone TEXT NOT NULL DEFAULT '',
-  payment_instructions TEXT NOT NULL DEFAULT ''
+  payment_instructions TEXT NOT NULL DEFAULT '',
+  invoice_prefix TEXT NOT NULL DEFAULT 'INV-',
+  invoice_number_padding INTEGER NOT NULL DEFAULT 4,
+  invoice_number_format TEXT NOT NULL DEFAULT '{PREFIX}{YYYY}-{NUMBER}'
+  ,preferred_email_provider TEXT,
+  default_currency TEXT NOT NULL DEFAULT 'USD'
 );
 INSERT OR IGNORE INTO business_profile (id) VALUES (1);
+CREATE TABLE IF NOT EXISTS currencies (
+  code TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  sign TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+INSERT OR IGNORE INTO currencies (code, name, sign) VALUES ('USD', 'US dollar', '$'), ('CAD', 'Canadian dollar', 'CA$'), ('EUR', 'Euro', '€');
 CREATE TABLE IF NOT EXISTS line_items (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   invoice_id INTEGER NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
@@ -79,5 +91,13 @@ CREATE TABLE IF NOT EXISTS integrations (
   config_json TEXT NOT NULL DEFAULT '{}',
   connected_at TEXT,
   last_error TEXT
+);
+CREATE TABLE IF NOT EXISTS backup_settings (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  recipient_email TEXT NOT NULL,
+  interval_days INTEGER NOT NULL DEFAULT 14,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  last_sent_at TEXT,
+  next_run_at TEXT NOT NULL
 );
 `

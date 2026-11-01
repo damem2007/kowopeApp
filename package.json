@@ -6,21 +6,20 @@
   "scripts": {
     "dev": "concurrently \"vite\" \"node server/index.js\"",
     "build": "vite build",
-    "start": "node server/index.js"
-    ,"recurring:run": "node server/recurring-run.js"
+    "start": "node server/index.js",
+    "recurring:run": "node server/recurring-run.js"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
-    "concurrently": "latest",
-    "express": "latest",
     "better-sqlite3": "latest",
+    "concurrently": "latest",
     "dotenv": "latest",
+    "express": "latest",
+    "lucide-react": "latest",
     "nodemailer": "latest",
     "pdfkit": "latest",
-    "vite": "latest",
     "react": "latest",
     "react-dom": "latest",
-    "lucide-react": "latest"
-  },
-  "devDependencies": {}
+    "vite": "latest"
+  }
 }
