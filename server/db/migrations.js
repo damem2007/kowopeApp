@@ -125,6 +125,21 @@ const migrations = [
       if (!userColumns.some((column) => column.name === 'role')) db.exec("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'")
     },
   },
+  {
+    version: 11,
+    apply(db) {
+      db.exec(`CREATE TABLE IF NOT EXISTS security_settings (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        reset_token_minutes INTEGER NOT NULL DEFAULT 15,
+        password_min_length INTEGER NOT NULL DEFAULT 12,
+        require_uppercase INTEGER NOT NULL DEFAULT 0,
+        require_lowercase INTEGER NOT NULL DEFAULT 0,
+        require_number INTEGER NOT NULL DEFAULT 0,
+        require_symbol INTEGER NOT NULL DEFAULT 0
+      )`)
+      db.prepare('INSERT OR IGNORE INTO security_settings (id) VALUES (1)').run()
+    },
+  },
 ]
 
 export function runMigrations(db) {

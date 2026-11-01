@@ -20,5 +20,10 @@ export const state = {
   authSetupRequired: false,
   allowSignup: false,
   authMode: 'login',
+  authBusy: false,
+  resetToken: '',
+  authMessage: '',
+  authUserRole: null,
+  securitySettings: null,
 };
 

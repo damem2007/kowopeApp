@@ -1,0 +1,12 @@
+.env
+.env.*
+!.env.example
+
+data/*.db
+data/*.db-*
+.vault-key.rotated
+
+node_modules/
+dist/
+tmp/
+.DS_Store

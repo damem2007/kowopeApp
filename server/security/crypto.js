@@ -6,7 +6,7 @@ dotenv.config()
 const rawKey = process.env.VAULT_KEY || process.env.LEDGERLY_ENCRYPTION_KEY
 if (!rawKey) throw new Error('VAULT_KEY is required to encrypt Ledgerly data.')
 const encryptionKey = crypto.createHash('sha256').update(rawKey).digest()
-const prefix = 'aes256gcm:v1:'
+const prefix = 'kowope:v1:'
 
 export function encryptValue(value) {
   if (value === null || value === undefined || value === '') return value ?? ''
@@ -28,4 +28,5 @@ export function decryptValue(value) {
 
 export const decryptFields = (record, fields) => record ? Object.fromEntries(Object.entries(record).map(([key, value]) => [key, fields.includes(key) ? decryptValue(value) : value])) : record
 export const businessFields = ['name', 'address', 'email', 'phone', 'payment_instructions']
-export const invoiceFields = ['client_name', 'client_email', 'description', 'payment_instructions']
+export const invoiceFields = ['client_name', 'client_email', 'client_address', 'description', 'payment_instructions']
+export const clientFields = ['name', 'email', 'company', 'address', 'phone', 'notes']

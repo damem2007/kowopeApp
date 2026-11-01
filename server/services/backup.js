@@ -4,21 +4,35 @@ import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import nodemailer from 'nodemailer'
-import { decryptValue } from '../security/crypto.js'
+import Database from 'better-sqlite3'
+import { decryptFields, decryptValue, businessFields } from '../security/crypto.js'
 
 const executeFile = promisify(execFile)
 const fourteenDaysMs = 14 * 24 * 60 * 60 * 1000
 
-function selectEmailIntegration(db) {
-  const preferredProvider = db.prepare('SELECT preferred_email_provider FROM business_profile WHERE id = 1').get()?.preferred_email_provider || ''
+function preferredEmailProvider(db) {
+  const columns = db.prepare('PRAGMA table_info(business_profile)').all()
+  if (!columns.some(column => column.name === 'preferred_email_provider')) return ''
+  return db.prepare('SELECT preferred_email_provider FROM business_profile WHERE id = 1').get()?.preferred_email_provider || ''
+}
+
+function selectEmailIntegration(db, preferredProvider = '') {
   return db.prepare("SELECT * FROM integrations WHERE provider IN ('mailjet', 'outlook', 'gmail') AND status = 'connected' ORDER BY CASE WHEN provider = ? THEN 0 WHEN provider = 'mailjet' THEN 1 WHEN provider = 'outlook' THEN 2 WHEN provider = 'gmail' THEN 3 ELSE 4 END, connected_at DESC LIMIT 1").get(preferredProvider)
 }
 
-async function createZipBackup(db, databasePath) {
+async function createZipBackup(db, databasePath, businessOnly = false) {
   const temporaryDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'kowope-backup-'))
   const temporaryDatabasePath = path.join(temporaryDirectory, 'kowope.sqlite')
   const zipPath = path.join(temporaryDirectory, `kowope-backup-${new Date().toISOString().slice(0, 10)}.zip`)
   await db.backup(temporaryDatabasePath)
+  if (businessOnly) {
+    const filteredDatabase = new Database(temporaryDatabasePath)
+    filteredDatabase.pragma('foreign_keys = OFF')
+    for (const tableName of ['users', 'security_settings', 'backup_settings', 'schema_migrations', 'integrations']) {
+      filteredDatabase.exec(`DROP TABLE IF EXISTS ${tableName}`)
+    }
+    filteredDatabase.close()
+  }
   await executeFile('zip', ['-j', zipPath, temporaryDatabasePath])
   return { temporaryDirectory, zipPath, databasePath }
 }
@@ -39,7 +53,7 @@ async function sendWithSmtp(integration, recipientEmail, zipPath, businessName) 
 export async function runScheduledBackup(db, databasePath, force = false) {
   const settings = db.prepare('SELECT * FROM backup_settings WHERE id = 1').get()
   if (!settings?.enabled || !settings.recipient_email || (!force && new Date(settings.next_run_at).getTime() > Date.now())) return { skipped: true, nextRunAt: settings?.next_run_at || null }
-  const integration = selectEmailIntegration(db)
+  const integration = selectEmailIntegration(db, preferredEmailProvider(db))
   if (!integration) throw new Error('No connected email provider is available for the scheduled backup.')
   const businessName = decryptValue(db.prepare('SELECT name FROM business_profile WHERE id = 1').get()?.name) || 'Kowope'
   const backup = await createZipBackup(db, databasePath)
@@ -49,6 +63,21 @@ export async function runScheduledBackup(db, databasePath, force = false) {
     const nextRunAt = new Date(Date.now() + (Number(settings.interval_days) || 14) * 24 * 60 * 60 * 1000).toISOString()
     db.prepare('UPDATE backup_settings SET last_sent_at = CURRENT_TIMESTAMP, next_run_at = ? WHERE id = 1').run(nextRunAt)
     return { sent: true, provider: integration.provider, recipient: settings.recipient_email, nextRunAt }
+  } finally { await fs.rm(backup.temporaryDirectory, { recursive: true, force: true }) }
+}
+
+export async function runManualBusinessBackup(db, databasePath) {
+  const business = decryptFields(db.prepare('SELECT name, email FROM business_profile WHERE id = 1').get(), businessFields)
+  const recipientEmail = String(business?.email || '').trim()
+  if (!recipientEmail) throw new Error('Add a business email before creating a backup.')
+  const integration = selectEmailIntegration(db, preferredEmailProvider(db))
+  if (!integration) throw new Error('No connected email provider is available for backup delivery.')
+  const businessName = decryptValue(business?.name) || 'Kowope'
+  const backup = await createZipBackup(db, databasePath, true)
+  try {
+    if (integration.provider === 'mailjet') await sendWithMailjet(integration, recipientEmail, backup.zipPath, businessName)
+    else await sendWithSmtp(integration, recipientEmail, backup.zipPath, businessName)
+    return { sent: true, provider: integration.provider, recipient: recipientEmail }
   } finally { await fs.rm(backup.temporaryDirectory, { recursive: true, force: true }) }
 }
 

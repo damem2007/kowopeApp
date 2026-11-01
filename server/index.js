@@ -8,8 +8,8 @@ import { fileURLToPath } from "node:url";
 import { initializeDatabase } from "./db/index.js";
 import { runDueSchedules } from './services/recurrence.js';
 import { startBackupService } from './services/backup.js';
-import { runScheduledBackup } from './services/backup.js';
-import { decryptFields, decryptValue, encryptValue, businessFields, invoiceFields } from './security/crypto.js';
+import { runScheduledBackup, runManualBusinessBackup } from './services/backup.js';
+import { decryptFields, decryptValue, encryptValue, businessFields, invoiceFields, clientFields } from './security/crypto.js';
 
 dotenv.config();
 
@@ -20,18 +20,24 @@ app.use(express.json());
 const db = initializeDatabase();
 const databasePath = path.join(__dirname, '../data/invoices.db');
 startBackupService(db, databasePath);
-if (!db.prepare('SELECT id FROM users LIMIT 1').get() && process.env.KOWOPE_OWNER_EMAIL && process.env.KOWOPE_OWNER_PASSWORD) {
-  db.prepare('INSERT INTO users (email, password_hash, role) VALUES (?, ?, ?)').run(process.env.KOWOPE_OWNER_EMAIL.trim().toLowerCase(), hashPassword(process.env.KOWOPE_OWNER_PASSWORD), 'owner');
-}
 const getBusinessProfile = () => decryptFields(db.prepare('SELECT * FROM business_profile WHERE id = 1').get(), businessFields);
 const getIntegrationConfig = integration => integration ? { ...integration, config_json: decryptValue(integration.config_json || '{}') } : integration;
 const decryptInvoice = invoice => decryptFields(invoice, invoiceFields);
+const decryptClient = client => decryptFields(client, clientFields);
 const oauthStates = new Map();
 const sessions = new Map();
+const passwordResetTokens = new Map();
 const sessionCookie = 'ledgerly_session';
 const hashPassword = (password, salt = crypto.randomBytes(16).toString('hex')) => `${salt}:${crypto.scryptSync(password, salt, 64).toString('hex')}`;
 const verifyPassword = (password, storedHash) => { const [salt, hash] = storedHash.split(':'); const candidate = crypto.scryptSync(password, salt, 64); return crypto.timingSafeEqual(candidate, Buffer.from(hash, 'hex')); };
 const readSession = req => { const cookie = req.headers.cookie?.split(';').map(value => value.trim()).find(value => value.startsWith(`${sessionCookie}=`)); return cookie ? sessions.get(cookie.slice(sessionCookie.length + 1)) : null; };
+const sessionUser = req => { const userId = readSession(req); return userId ? db.prepare('SELECT id, email, role FROM users WHERE id = ?').get(userId) : null; };
+const requireOwner = (req, res, next) => { const user = sessionUser(req); if (!user) return res.status(401).json({ error: 'Authentication required.' }); if (user.role !== 'owner') return res.status(403).json({ error: 'Owner access required.' }); req.user = user; next(); };
+const getSecuritySettings = () => db.prepare('SELECT * FROM security_settings WHERE id = 1').get();
+const passwordPolicyError = password => { const settings = getSecuritySettings(); if (password.length < settings.password_min_length) return `Password must be at least ${settings.password_min_length} characters.`; if (settings.require_uppercase && !/[A-Z]/.test(password)) return 'Password must include an uppercase letter.'; if (settings.require_lowercase && !/[a-z]/.test(password)) return 'Password must include a lowercase letter.'; if (settings.require_number && !/[0-9]/.test(password)) return 'Password must include a number.'; if (settings.require_symbol && !/[^A-Za-z0-9]/.test(password)) return 'Password must include a symbol.'; return null; };
+if (!db.prepare('SELECT id FROM users LIMIT 1').get() && process.env.KOWOPE_OWNER_EMAIL && process.env.KOWOPE_OWNER_PASSWORD) {
+  db.prepare('INSERT INTO users (email, password_hash, role) VALUES (?, ?, ?)').run(process.env.KOWOPE_OWNER_EMAIL.trim().toLowerCase(), hashPassword(process.env.KOWOPE_OWNER_PASSWORD), 'owner');
+}
 
 function getProviders() {
   const smtpConfigured = Boolean(
@@ -88,13 +94,16 @@ function getProviders() {
 }
 
 app.get("/api/providers", (_req, res) => res.json(getProviders()));
-app.get('/api/auth/status', (_req, res) => res.json({ authenticated: Boolean(readSession(_req)), allowSignup: Boolean(db.prepare('SELECT allow_user_signup FROM business_profile WHERE id = 1').get()?.allow_user_signup) }));
+const hasUsers = () => Boolean(db.prepare('SELECT id FROM users LIMIT 1').get());
+const signupIsAllowed = () => !hasUsers() || Boolean(db.prepare('SELECT allow_user_signup FROM business_profile WHERE id = 1').get()?.allow_user_signup);
+app.get('/api/auth/status', (_req, res) => { const user = sessionUser(_req); res.json({ authenticated: Boolean(user), allowSignup: signupIsAllowed(), role: user?.role || null }); });
 app.post('/api/auth/signup', (req, res) => {
-  if (!db.prepare('SELECT allow_user_signup FROM business_profile WHERE id = 1').get()?.allow_user_signup) return res.status(403).json({ error: 'New user accounts are disabled by the owner.' });
+  if (!signupIsAllowed()) return res.status(403).json({ error: 'New user accounts are disabled by the owner.' });
   const email = String(req.body.email || '').trim().toLowerCase();
   const password = String(req.body.password || '');
-  if (!/^\S+@\S+\.\S+$/.test(email) || password.length < 12) return res.status(400).json({ error: 'Use a valid email and a password of at least 12 characters.' });
-  try { const user = db.prepare('INSERT INTO users (email, password_hash, role) VALUES (?, ?, ?)').run(email, hashPassword(password), 'user'); const token = crypto.randomBytes(32).toString('hex'); sessions.set(token, user.lastInsertRowid); res.setHeader('Set-Cookie', `${sessionCookie}=${token}; HttpOnly; SameSite=Strict; Path=/`); res.status(201).json({ authenticated: true }); }
+  const policyError = passwordPolicyError(password);
+  if (!/^\S+@\S+\.\S+$/.test(email) || policyError) return res.status(400).json({ error: policyError || 'Use a valid email.' });
+  try { const firstUser = !hasUsers(); const user = db.prepare('INSERT INTO users (email, password_hash, role) VALUES (?, ?, ?)').run(email, hashPassword(password), firstUser ? 'owner' : 'user'); if (firstUser) db.prepare('UPDATE business_profile SET allow_user_signup = 0 WHERE id = 1').run(); const token = crypto.randomBytes(32).toString('hex'); sessions.set(token, user.lastInsertRowid); res.setHeader('Set-Cookie', `${sessionCookie}=${token}; HttpOnly; SameSite=Strict; Path=/`); res.status(201).json({ authenticated: true }); }
   catch (error) { res.status(409).json({ error: error.message.includes('UNIQUE') ? 'An account with that email already exists.' : error.message }); }
 });
 app.post('/api/auth/login', (req, res) => {
@@ -105,6 +114,47 @@ app.post('/api/auth/login', (req, res) => {
   const token = crypto.randomBytes(32).toString('hex'); sessions.set(token, user.id);
   res.setHeader('Set-Cookie', `${sessionCookie}=${token}; HttpOnly; SameSite=Strict; Path=/`); res.json({ authenticated: true });
 });
+app.post('/api/auth/forgot-password', async (req, res) => {
+  const email = String(req.body.email || '').trim().toLowerCase();
+  const genericResponse = { message: `If an account exists for that email, a reset link has been sent. The link expires in ${getSecuritySettings().reset_token_minutes} minutes.` };
+  const user = db.prepare('SELECT id, email FROM users WHERE email = ?').get(email);
+  if (!user) return res.json(genericResponse);
+  try {
+    const token = crypto.randomBytes(32).toString('hex');
+    const securitySettings = getSecuritySettings();
+    passwordResetTokens.set(token, { userId: user.id, expiresAt: Date.now() + securitySettings.reset_token_minutes * 60 * 1000 });
+    const frontendUrl = process.env.PUBLIC_APP_URL || 'http://localhost:5173';
+    const resetUrl = `${frontendUrl.replace(/\/$/, '')}/?reset=${token}`;
+    const integration = db.prepare("SELECT * FROM integrations WHERE provider IN ('mailjet', 'outlook', 'gmail') AND status = 'connected' ORDER BY connected_at DESC LIMIT 1").get();
+    const config = integration ? JSON.parse(decryptValue(integration.config_json || '{}')) : {};
+    const business = getBusinessProfile() || {};
+    const subject = 'Reset your Kowope password';
+    const message = `Use this link to reset your Kowope password:\n\n${resetUrl}\n\nThis link expires in ${securitySettings.reset_token_minutes} minutes. If you did not request this, you can ignore this email.`;
+    if (integration?.provider === 'mailjet' && config.apiKey && config.secretKey) {
+      const authorization = Buffer.from(`${config.apiKey}:${config.secretKey}`).toString('base64');
+      const response = await fetch('https://api.mailjet.com/v3.1/send', { method: 'POST', headers: { Authorization: `Basic ${authorization}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ Messages: [{ From: { Email: config.senderEmail || business.email, Name: config.fromName || business.name || 'Kowope' }, To: [{ Email: user.email }], Subject: subject, TextPart: message }] }) });
+      if (!response.ok) throw new Error('Mail provider rejected the reset email.');
+    } else {
+      const transporter = nodemailer.createTransport({ host: config.host || process.env.SMTP_HOST, port: Number(config.port || process.env.SMTP_PORT || 587), secure: config.secure ?? process.env.SMTP_SECURE === 'true', auth: { user: config.emailAddress || process.env.SMTP_USER, pass: config.smtpPassword || process.env.SMTP_PASS } });
+      await transporter.sendMail({ from: process.env.INVOICE_FROM || config.emailAddress || process.env.SMTP_USER, to: user.email, subject, text: message });
+    }
+    return res.json(genericResponse);
+  } catch (error) {
+    passwordResetTokens.delete([...passwordResetTokens.keys()].find(token => passwordResetTokens.get(token)?.userId === user.id));
+    return res.status(502).json({ error: `Unable to send reset email: ${error.message}` });
+  }
+});
+app.post('/api/auth/reset-password', (req, res) => {
+  const token = String(req.body.token || '');
+  const newPassword = String(req.body.newPassword || '');
+  const reset = passwordResetTokens.get(token);
+  if (!reset || reset.expiresAt < Date.now()) return res.status(400).json({ error: 'This reset link is invalid or expired.' });
+  const policyError = passwordPolicyError(newPassword);
+  if (policyError) return res.status(400).json({ error: policyError });
+  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(newPassword), reset.userId);
+  passwordResetTokens.delete(token);
+  res.json({ ok: true });
+});
 app.post('/api/auth/password', (req, res) => {
   const userId = readSession(req);
   if (!userId) return res.status(401).json({ error: 'Authentication required.' });
@@ -112,15 +162,29 @@ app.post('/api/auth/password', (req, res) => {
   const newPassword = String(req.body.newPassword || '');
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
   if (!user || !verifyPassword(currentPassword, user.password_hash)) return res.status(400).json({ error: 'Current password is incorrect.' });
-  if (newPassword.length < 12) return res.status(400).json({ error: 'New password must be at least 12 characters.' });
+  const policyError = passwordPolicyError(newPassword);
+  if (policyError) return res.status(400).json({ error: policyError });
   db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(newPassword), userId);
   res.json({ ok: true });
 });
 app.get('/api/platform/user-management', (req, res) => { if (!readSession(req)) return res.status(401).json({ error: 'Authentication required.' }); res.json({ allowSignup: Boolean(db.prepare('SELECT allow_user_signup FROM business_profile WHERE id = 1').get()?.allow_user_signup) }); });
 app.put('/api/platform/user-management', (req, res) => { if (!readSession(req)) return res.status(401).json({ error: 'Authentication required.' }); db.prepare('UPDATE business_profile SET allow_user_signup = ? WHERE id = 1').run(req.body.allowSignup ? 1 : 0); res.json({ allowSignup: Boolean(req.body.allowSignup) }); });
+app.get('/api/account/security', requireOwner, (_req, res) => res.json({ backup: db.prepare('SELECT * FROM backup_settings WHERE id = 1').get(), password: getSecuritySettings() }));
+app.put('/api/account/security', requireOwner, (req, res) => {
+  const backup = req.body.backup || {}, password = req.body.password || {};
+  const intervalDays = Math.min(365, Math.max(1, Number(backup.intervalDays) || 14));
+  const resetTokenMinutes = Math.min(1440, Math.max(5, Number(password.resetTokenMinutes) || 15));
+  const passwordMinLength = Math.min(128, Math.max(8, Number(password.passwordMinLength) || 12));
+  const recipientEmail = String(backup.recipientEmail || '').trim().toLowerCase();
+  if (!/^\S+@\S+\.\S+$/.test(recipientEmail)) return res.status(400).json({ error: 'Enter a valid backup email.' });
+  const nextRunAt = new Date(Date.now() + intervalDays * 24 * 60 * 60 * 1000).toISOString();
+  db.prepare('UPDATE backup_settings SET recipient_email = ?, interval_days = ?, enabled = ?, next_run_at = ? WHERE id = 1').run(recipientEmail, intervalDays, backup.enabled === false ? 0 : 1, nextRunAt);
+  db.prepare('UPDATE security_settings SET reset_token_minutes = ?, password_min_length = ?, require_uppercase = ?, require_lowercase = ?, require_number = ?, require_symbol = ? WHERE id = 1').run(resetTokenMinutes, passwordMinLength, password.requireUppercase ? 1 : 0, password.requireLowercase ? 1 : 0, password.requireNumber ? 1 : 0, password.requireSymbol ? 1 : 0);
+  res.json({ backup: db.prepare('SELECT * FROM backup_settings WHERE id = 1').get(), password: getSecuritySettings() });
+});
 app.post('/api/auth/logout', (req, res) => { const cookie = req.headers.cookie?.split(';').map(value => value.trim()).find(value => value.startsWith(`${sessionCookie}=`)); if (cookie) sessions.delete(cookie.slice(sessionCookie.length + 1)); res.setHeader('Set-Cookie', `${sessionCookie}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0`); res.status(204).end(); });
 app.use('/api', (req, res, next) => { if (req.path.startsWith('/auth/')) return next(); if (!readSession(req)) return res.status(401).json({ error: 'Authentication required.' }); next(); });
-app.post('/api/backups/run', async (_req, res) => { try { const result = await runScheduledBackup(db, databasePath, true); res.json(result); } catch (error) { res.status(502).json({ error: error.message }); } });
+app.post('/api/backups/run', async (_req, res) => { try { const result = await runManualBusinessBackup(db, databasePath); res.json(result); } catch (error) { res.status(502).json({ error: error.message }); } });
 app.get('/api/integrations', (_req, res) => res.json(db.prepare('SELECT provider, status, account_label, config_json, connected_at, last_error FROM integrations ORDER BY provider').all().map(getIntegrationConfig)))
 app.put('/api/integrations/:provider', (req, res) => {
   const { status = 'connected', accountLabel = '', config = {} } = req.body
@@ -149,7 +213,7 @@ app.get('/api/integrations/outlook/oauth/callback', async (req, res) => {
     res.redirect('/?outlook=connected');
   } catch (error) { res.status(500).send(error.message); }
 });
-app.get('/api/recurring', (_req, res) => res.json(db.prepare('SELECT s.*, c.name AS client_name, p.amount AS current_amount FROM recurring_schedules s JOIN clients c ON c.id = s.client_id LEFT JOIN schedule_price_history p ON p.schedule_id = s.id AND p.id = (SELECT id FROM schedule_price_history WHERE schedule_id = s.id ORDER BY effective_from DESC, id DESC LIMIT 1) ORDER BY s.next_run_at').all().map(schedule => ({ ...schedule, description: decryptValue(schedule.description) }))));
+app.get('/api/recurring', (_req, res) => res.json(db.prepare('SELECT s.*, c.name AS client_name, p.amount AS current_amount FROM recurring_schedules s JOIN clients c ON c.id = s.client_id LEFT JOIN schedule_price_history p ON p.schedule_id = s.id AND p.id = (SELECT id FROM schedule_price_history WHERE schedule_id = s.id ORDER BY effective_from DESC, id DESC LIMIT 1) ORDER BY s.next_run_at').all().map(schedule => ({ ...schedule, client_name: decryptValue(schedule.client_name), description: decryptValue(schedule.description) }))));
 app.post('/api/recurring', (req, res) => {
   const { clientId, description, amount, frequency, nextRunAt, currency = 'USD', autoSend = 0, sourceInvoiceId = null } = req.body;
   if (!clientId || !description || !(Number(amount) > 0) || !frequency || !nextRunAt) return res.status(400).json({ error: 'Client, description, amount, frequency, and next invoice date are required.' });
@@ -215,14 +279,14 @@ app.get("/api/clients", (_req, res) =>
       .prepare(
         `SELECT c.*, COUNT(i.id) AS invoice_count, COALESCE(SUM(CASE WHEN i.status != 'Paid' THEN i.amount ELSE 0 END), 0) AS outstanding FROM clients c LEFT JOIN invoices i ON i.client_id = c.id GROUP BY c.id ORDER BY c.name`,
       )
-      .all().map(decryptInvoice),
+      .all().map(decryptClient),
   ),
 );
 app.get("/api/clients/:id/invoices", (req, res) =>
   res.json(
     db
       .prepare("SELECT * FROM invoices WHERE client_id = ? ORDER BY id DESC")
-      .all(req.params.id),
+      .all(req.params.id).map(decryptInvoice),
   ),
 );
 app.post("/api/clients", (req, res) => {
@@ -243,13 +307,15 @@ app.post("/api/clients", (req, res) => {
       .prepare(
         "INSERT INTO clients (name, email, company, address, phone, notes) VALUES (?, ?, ?, ?, ?, ?)",
       )
-      .run(name, email, company, address, phone, notes);
+      .run(encryptValue(name), encryptValue(email), encryptValue(company), encryptValue(address), encryptValue(phone), encryptValue(notes));
     res
       .status(201)
       .json(
-        db
-          .prepare("SELECT * FROM clients WHERE id = ?")
-          .get(result.lastInsertRowid),
+        decryptClient(
+          db
+            .prepare("SELECT * FROM clients WHERE id = ?")
+            .get(result.lastInsertRowid),
+        ),
       );
   } catch (error) {
     res
@@ -277,9 +343,9 @@ app.patch("/api/clients/:id", (req, res) => {
   try {
     db.prepare(
       "UPDATE clients SET name = ?, email = ?, company = ?, address = ?, phone = ?, notes = ? WHERE id = ?",
-    ).run(name, email, company, address, phone, notes, req.params.id);
+    ).run(encryptValue(name), encryptValue(email), encryptValue(company), encryptValue(address), encryptValue(phone), encryptValue(notes), req.params.id);
     res.json(
-      db.prepare("SELECT * FROM clients WHERE id = ?").get(req.params.id),
+      decryptClient(db.prepare("SELECT * FROM clients WHERE id = ?").get(req.params.id)),
     );
   } catch (error) {
     res
@@ -310,7 +376,8 @@ app.get("/api/invoices", (_req, res) =>
       .prepare(
         "SELECT i.*, c.name AS client_name, c.email AS client_email, c.address AS client_address FROM invoices i LEFT JOIN clients c ON c.id = i.client_id ORDER BY i.id DESC",
       )
-      .all(),
+      .all()
+      .map(decryptInvoice),
   ),
 );
 app.get('/api/invoices/:id', (req, res) => {
@@ -342,14 +409,16 @@ app.post("/api/invoices", (req, res) => {
     try {
       const result = db
         .prepare("INSERT INTO clients (name, email, address) VALUES (?, ?, ?)")
-        .run(clientName, clientEmail, clientAddress);
+        .run(encryptValue(clientName), encryptValue(clientEmail), encryptValue(clientAddress));
       client = db
         .prepare("SELECT * FROM clients WHERE id = ?")
         .get(result.lastInsertRowid);
     } catch (error) {
       client = db
-        .prepare("SELECT * FROM clients WHERE email = ?")
-        .get(clientEmail);
+        .prepare("SELECT * FROM clients")
+        .all()
+        .map(decryptClient)
+        .find(savedClient => savedClient.email === clientEmail);
       if (!client) return res.status(409).json({ error: error.message });
     }
   }
@@ -417,7 +486,7 @@ app.patch('/api/invoices/:id/status', (req, res) => {
   const invoice = db.prepare('SELECT * FROM invoices WHERE id = ? OR number = ?').get(req.params.id, req.params.id);
   if (!invoice) return res.status(404).json({ error: 'Invoice not found.' });
   db.prepare('UPDATE invoices SET status = ?, sent_at = CASE WHEN ? = \'Sent\' THEN CURRENT_TIMESTAMP ELSE sent_at END WHERE id = ?').run(status, status, invoice.id);
-  res.json(db.prepare('SELECT * FROM invoices WHERE id = ?').get(invoice.id));
+  res.json(decryptInvoice(db.prepare('SELECT * FROM invoices WHERE id = ?').get(invoice.id)));
 });
 app.delete('/api/invoices/:id', (req, res) => {
   const invoice = db.prepare('SELECT id FROM invoices WHERE id = ? OR number = ?').get(req.params.id, req.params.id);

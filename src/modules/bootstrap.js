@@ -6,11 +6,15 @@ export async function bootLedgerly() {
   const authResponse = await fetch('/api/auth/status')
   const authStatus = await authResponse.json()
   state.allowSignup = authStatus.allowSignup
+  state.authUserRole = authStatus.role || null
   if (!authStatus.authenticated) { state.authenticated = false; state.currentRoute = 'login'; render(); return }
   state.authenticated = true
+  state.currentRoute = 'overview'
   const defaultIntegrations = Object.fromEntries(Object.keys(providers).map(providerId => [providerId, { on: false, acct: '' }]))
   try {
-    const responses = await Promise.allSettled(['/api/clients', '/api/invoices', '/api/business-profile', '/api/integrations', '/api/payments', '/api/recurring', '/api/currencies'].map(endpoint => fetch(endpoint)))
+    const endpoints = ['/api/clients', '/api/invoices', '/api/business-profile', '/api/integrations', '/api/payments', '/api/recurring', '/api/currencies']
+    if (state.authUserRole === 'owner') endpoints.push('/api/account/security')
+    const responses = await Promise.allSettled(endpoints.map(endpoint => fetch(endpoint)))
     const parseJsonResponse = async (response, endpoint) => {
       const responseType = response.headers.get('content-type') || ''
       if (!response.ok || !responseType.includes('application/json')) throw new Error(`${endpoint} returned ${response.status} ${responseType || 'non-JSON response'}`)
@@ -26,6 +30,7 @@ export async function bootLedgerly() {
       readResponse(responses[5], '/api/recurring', []),
       readResponse(responses[6], '/api/currencies', []),
     ])
+    if (state.authUserRole === 'owner') state.securitySettings = await readResponse(responses[7], '/api/account/security', null)
     currencies.forEach(currency => { currencySigns[currency.code] = currency.sign; currencyNames[currency.code] = currency.name })
     state.defaultCurrency = businessProfile.default_currency || 'USD'
     state.clientNames = clients.map(clientRecord => clientRecord.name)

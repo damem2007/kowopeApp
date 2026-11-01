@@ -109,3 +109,29 @@ export const runManualBackup = async () => {
     toast(`Backup sent to ${result.recipient}`)
   } catch (error) { toast(error.message) }
 }
+
+export const saveSecuritySettings = async () => {
+  const backup = state.securitySettings?.backup || {}
+  const responseBody = {
+    backup: {
+      recipientEmail: $('#backup-email').value.trim(),
+      intervalDays: Number($('#backup-interval').value) || 14,
+      enabled: $('#backup-enabled').checked,
+    },
+    password: {
+      resetTokenMinutes: Number($('#reset-expiry').value) || 15,
+      passwordMinLength: Number($('#password-min-length').value) || 12,
+      requireUppercase: $('#password-uppercase').checked,
+      requireLowercase: $('#password-lowercase').checked,
+      requireNumber: $('#password-number').checked,
+      requireSymbol: $('#password-symbol').checked,
+    },
+  }
+  try {
+    const response = await fetch('/api/account/security', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(responseBody) })
+    const result = await response.json()
+    if (!response.ok) throw new Error(result.error || 'Unable to save security settings')
+    state.securitySettings = result
+    toast('Account security settings saved')
+  } catch (error) { toast(error.message) }
+}

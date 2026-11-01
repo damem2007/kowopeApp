@@ -11,14 +11,16 @@ import { wiz, manageIntegration, insertEmailToken, disc, savePreferredEmailProvi
 import { runRec, svNew, svNext, saveRec, saveChg, toggleRecurring, mrs } from './actions/recurring.js'
 import { addC, editClient, saveClientEdit } from './actions/clients.js'
 import { recPay } from './actions/payments.js'
-import { saveBiz, saveInvoiceNumbering, addInvoiceFormatToken, addInvoiceFormatTokenAtCursor, addCur, delCur, setDefaultCurrency, runManualBackup } from './actions/settings.js'
-import { loginAccount, signupAccount, logoutAccount, changePassword, setSignupAllowed } from './actions/auth.js'
+import { saveBiz, saveInvoiceNumbering, addInvoiceFormatToken, addInvoiceFormatTokenAtCursor, addCur, delCur, setDefaultCurrency, runManualBackup, saveSecuritySettings } from './actions/settings.js'
+import { loginAccount, signupAccount, logoutAccount, changePassword, setSignupAllowed, toggleAuthPassword, requestPasswordReset, resetPassword } from './actions/auth.js'
 
 let started = false
 
 export function startApp() {
   if (started) return
   started = true
+  const resetToken = new URLSearchParams(window.location.search).get('reset')
+  if (resetToken) { state.authMode = 'reset'; state.resetToken = resetToken }
 
 // Inline onclick/onchange handlers in the rendered markup resolve names on window.
 Object.assign(window, {
@@ -28,8 +30,8 @@ Object.assign(window, {
   runRec, svNew, svNext, saveRec, saveChg, toggleRecurring,
   addC, editClient, saveClientEdit,
   recPay,
-  saveBiz, saveInvoiceNumbering, addInvoiceFormatToken, addInvoiceFormatTokenAtCursor, addCur, delCur, setDefaultCurrency, runManualBackup,
-  loginAccount, signupAccount, logoutAccount, changePassword, setSignupAllowed,
+  saveBiz, saveInvoiceNumbering, addInvoiceFormatToken, addInvoiceFormatTokenAtCursor, addCur, delCur, setDefaultCurrency, runManualBackup, saveSecuritySettings,
+  loginAccount, signupAccount, logoutAccount, changePassword, setSignupAllowed, toggleAuthPassword, requestPasswordReset, resetPassword,
 })
 
 bootLedgerly()

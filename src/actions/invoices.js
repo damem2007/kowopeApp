@@ -133,6 +133,7 @@ export async function save(mode) {
   }
   if (mode === 'pdf') {
     const pdf = await fetch(`/api/invoices/${invoice.number}/pdf`)
+    if (!pdf.ok) return toast('Invoice saved, but the PDF could not be generated.')
     saveBlob(await pdf.blob(), `${invoice.number}.pdf`)
   }
   if (mode === 'send') {
