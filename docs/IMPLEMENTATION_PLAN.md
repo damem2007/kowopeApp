@@ -1,4 +1,4 @@
-# Ledgerly Prototype Implementation Plan
+# Kowope Prototype Implementation Plan
 
 ## Source of truth
 

@@ -1,4 +1,4 @@
-# Ledgerly Invoice Hub
+# Kowope Invoice Hub
 
 A Vite + React invoicing dashboard backed by a lightweight Node.js and Express API.
 

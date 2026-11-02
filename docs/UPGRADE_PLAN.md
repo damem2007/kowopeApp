@@ -1,4 +1,4 @@
-# Ledgerly Upgrade Plan
+# Kowope Upgrade Plan
 
 ## Database foundation
 

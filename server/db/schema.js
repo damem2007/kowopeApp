@@ -1,6 +1,6 @@
 export const schemaSql = `
 CREATE TABLE IF NOT EXISTS invoices (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id TEXT PRIMARY KEY,
   number TEXT UNIQUE NOT NULL,
   client_name TEXT NOT NULL,
   client_email TEXT NOT NULL,
@@ -12,10 +12,10 @@ CREATE TABLE IF NOT EXISTS invoices (
   status TEXT NOT NULL DEFAULT 'Draft',
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   sent_at TEXT,
-  client_id INTEGER REFERENCES clients(id)
+  client_id TEXT REFERENCES clients(id)
 );
 CREATE TABLE IF NOT EXISTS clients (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   email TEXT NOT NULL UNIQUE,
   company TEXT,
@@ -47,7 +47,7 @@ CREATE TABLE IF NOT EXISTS currencies (
 INSERT OR IGNORE INTO currencies (code, name, sign) VALUES ('USD', 'US dollar', '$'), ('CAD', 'Canadian dollar', 'CA$'), ('EUR', 'Euro', '€');
 CREATE TABLE IF NOT EXISTS line_items (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  invoice_id INTEGER NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
+  invoice_id TEXT NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
   description TEXT NOT NULL,
   quantity REAL NOT NULL DEFAULT 1,
   unit_price REAL NOT NULL DEFAULT 0,
@@ -55,7 +55,7 @@ CREATE TABLE IF NOT EXISTS line_items (
 );
 CREATE TABLE IF NOT EXISTS recurring_schedules (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  client_id INTEGER NOT NULL REFERENCES clients(id),
+  client_id TEXT NOT NULL REFERENCES clients(id),
   business_id INTEGER,
   description TEXT NOT NULL,
   frequency TEXT NOT NULL,
@@ -63,7 +63,7 @@ CREATE TABLE IF NOT EXISTS recurring_schedules (
   status TEXT NOT NULL DEFAULT 'active',
   next_run_at TEXT NOT NULL,
   auto_send INTEGER NOT NULL DEFAULT 0,
-  source_invoice_id INTEGER REFERENCES invoices(id),
+  source_invoice_id TEXT REFERENCES invoices(id),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS schedule_price_history (
@@ -76,8 +76,8 @@ CREATE TABLE IF NOT EXISTS schedule_price_history (
 );
 CREATE TABLE IF NOT EXISTS payments (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  invoice_id INTEGER NOT NULL REFERENCES invoices(id),
-  client_id INTEGER REFERENCES clients(id),
+  invoice_id TEXT NOT NULL REFERENCES invoices(id),
+  client_id TEXT REFERENCES clients(id),
   date TEXT NOT NULL,
   source TEXT NOT NULL DEFAULT 'Manual',
   method TEXT,

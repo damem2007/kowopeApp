@@ -19,9 +19,13 @@ export function initializeDatabase(filename = path.join(dataDir, 'invoices.db'))
   }
 
   const databaseFilename = databaseConfig.sqlitePath || filename
+  const databaseExists = fs.existsSync(databaseFilename) && fs.statSync(databaseFilename).size > 0
   const db = new Database(databaseFilename)
   db.pragma('foreign_keys = ON')
-  db.exec(schemaSql)
+  // The base schema is only for a brand-new database. Existing databases must
+  // be changed exclusively through versioned migrations; replaying the schema
+  // on every startup can fail against a deployed/read-only SQLite volume.
+  if (!databaseExists) db.exec(schemaSql)
   runMigrations(db)
   return db
 }

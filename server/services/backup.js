@@ -82,7 +82,7 @@ export async function runManualBusinessBackup(db, databasePath) {
 }
 
 export function startBackupService(db, databasePath) {
-  const check = () => runScheduledBackup(db, databasePath).catch(error => console.error('Ledgerly backup failed:', error.message))
+  const check = () => runScheduledBackup(db, databasePath).catch(error => console.error('Kowope backup failed:', error.message))
   const timer = setInterval(check, 60 * 60 * 1000)
   timer.unref?.()
   return timer

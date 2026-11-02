@@ -3,8 +3,8 @@ import dotenv from 'dotenv'
 
 dotenv.config()
 
-const rawKey = process.env.VAULT_KEY || process.env.LEDGERLY_ENCRYPTION_KEY
-if (!rawKey) throw new Error('VAULT_KEY is required to encrypt Ledgerly data.')
+const rawKey = process.env.VAULT_KEY
+if (!rawKey) throw new Error('VAULT_KEY is required to encrypt Kowope data.')
 const encryptionKey = crypto.createHash('sha256').update(rawKey).digest()
 const prefix = 'kowope:v1:'
 

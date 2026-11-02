@@ -1,4 +1,5 @@
 import { decryptValue, encryptValue } from '../security/crypto.js'
+import { randomUUID } from 'node:crypto'
 
 const asDate = (value) => new Date(`${value}T00:00:00Z`)
 export function addInterval(value, frequency) {
@@ -30,8 +31,9 @@ export function runDueSchedules(db, today = new Date().toISOString().slice(0, 10
           const count = db.prepare('SELECT COUNT(*) AS count FROM invoices').get().count + 1
           const number = `INV-${String(count).padStart(4, '0')}`
           const description = decryptValue(schedule.description)
-          const invoice = db.prepare('INSERT INTO invoices (number, client_id, client_name, client_email, description, amount, currency, due_date, status, schedule_id, issue_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(number, client.id, encryptValue(client.name), encryptValue(client.email), encryptValue(description), price.amount, schedule.currency_code, runDate, 'Draft', schedule.id, runDate)
-          db.prepare('INSERT INTO line_items (invoice_id, description, quantity, unit_price) VALUES (?, ?, 1, ?)').run(invoice.lastInsertRowid, encryptValue(description), price.amount)
+          const invoiceId = randomUUID()
+          db.prepare('INSERT INTO invoices (id, number, client_id, client_name, client_email, description, amount, currency, due_date, status, schedule_id, issue_date, organization_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(invoiceId, number, client.id, encryptValue(client.name), encryptValue(client.email), encryptValue(description), price.amount, schedule.currency_code, runDate, 'Draft', schedule.id, runDate, schedule.organization_id)
+          db.prepare('INSERT INTO line_items (invoice_id, description, quantity, unit_price) VALUES (?, ?, 1, ?)').run(invoiceId, encryptValue(description), price.amount)
           created.push(number)
         }
         runDate = addInterval(runDate, schedule.frequency)

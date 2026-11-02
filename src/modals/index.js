@@ -5,6 +5,7 @@ import { pastInvoiceModal } from './pastInvoice.js'
 import { changePriceModal, makeRecurringModal } from './recurring.js'
 import { newClientModal, clientEditModal } from './client.js'
 import { recordPaymentModal } from './payment.js'
+import { createOrganizationModal } from './organization.js'
 
 export function modal() {
   const m = state.activeModal
@@ -15,5 +16,6 @@ export function modal() {
   if (m === "chg") return changePriceModal()
   if (m === "mkrec") return makeRecurringModal()
   if (m === "client") return newClientModal()
+  if (m === "organization") return createOrganizationModal()
   return recordPaymentModal()
 }

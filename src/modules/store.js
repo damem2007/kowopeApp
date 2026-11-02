@@ -19,11 +19,18 @@ export const state = {
   authenticated: false,
   authSetupRequired: false,
   allowSignup: false,
+  ownerSetupRequired: false,
   authMode: 'login',
   authBusy: false,
   resetToken: '',
+  verifyToken: '',
   authMessage: '',
+  authError: '',
+  authNeedsVerification: false,
+  authEmail: '',
   authUserRole: null,
+  platformUsers: [],
+  organization: null,
   securitySettings: null,
 };
 
