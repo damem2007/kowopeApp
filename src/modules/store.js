@@ -5,6 +5,7 @@ export const state = {
   clientNames: [],
   clientDetails: [],
   businessProfiles: [],
+  businessLogoDraft: undefined,
   invoices: [],
   payments: [],
   recurringServices: [],
@@ -33,5 +34,7 @@ export const state = {
   organization: null,
   securitySettings: null,
   mobileMenuOpen: false,
+  guestInvoice: { businessName: '', businessAddress: '', businessEmail: '', businessPhone: '', clientName: '', clientAddress: '', clientEmail: '', clientPhone: '', items: [{ d: '', q: 1, p: 0 }], tax: 0, tn: 'Tax', dv: 0, dt: '%', notes: '', amount: 0, dueDate: '', currency: 'USD', logoDataUrl: '' },
+  guestInfoOpen: false,
 };
 

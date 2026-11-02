@@ -15,6 +15,8 @@ import { modal } from '../modals/index.js'
 import { login } from '../pages/login.js'
 import { platformUsers } from '../pages/platformUsers.js'
 import { organization } from '../pages/organization.js'
+import { guestEditor } from '../pages/guestEditor.js'
+import { guestPreview as guestPreviewPage } from '../pages/guestPreview.js'
 
 export const go = (route, invoiceTab) => { state.currentRoute = route; if (invoiceTab) state.activeInvoiceTab = invoiceTab; state.searchQuery = ""; state.openMenuIndex = 0; state.invoiceEditor = null; state.mobileMenuOpen = false; render(); scrollTo(0, 0) }
 export const toast = (message, undo, options = {}) => {
@@ -30,6 +32,8 @@ export const toast = (message, undo, options = {}) => {
 export function render() {
   const progress = '<div id="api-progress" class="api-progress" role="progressbar" aria-label="Working" hidden></div>'
   if (state.currentRoute === 'login') { $("#root").innerHTML = progress + login(); return }
+  if (state.currentRoute === 'guest-new') { $("#root").innerHTML = progress + `<main class="guest-editor-page">${guestEditor()}</main>`; return }
+  if (state.currentRoute === 'guest-preview') { $("#root").innerHTML = progress + `<main class="guest-editor-page">${guestPreviewPage()}</main>`; return }
   const pg = { overview, invoices, clients, payments, integrations, users: platformUsers, organization, settings, new: editor, preview: prevP, svc: service }[state.currentRoute]()
   $("#root").innerHTML = progress + shell(pg) + (state.integrationWizard ? wizView() : "") + (state.activeModal ? modal() : "") + (state.toast ? `<div class="toast ${state.toast.error ? 'toast-error' : 'toast-success'}" role="alert">${state.toast.m}${state.toast.persistent ? `<button onclick="state.toast=null;render()" aria-label="Dismiss">×</button>` : ''}${state.toast.u ? `<button onclick="state.toast.u()">Undo</button>` : ""}</div>` : "")
 }

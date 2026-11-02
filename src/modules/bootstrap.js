@@ -13,6 +13,10 @@ export async function bootKowope() {
   state.currentRoute = 'overview'
   const defaultIntegrations = Object.fromEntries(Object.keys(providers).map(providerId => [providerId, { on: false, acct: '' }]))
   try {
+    // The singular profile endpoint is the canonical API contract. It returns
+    // the authenticated user's selected profile (or an empty object when no
+    // profile has been saved yet), so bootstrap never depends on a missing
+    // plural alias and never produces a misleading 404 in the browser.
     const endpoints = ['/api/clients', '/api/invoices', '/api/business-profile', '/api/integrations', '/api/payments', '/api/recurring', '/api/currencies']
     endpoints.push('/api/organization')
     if (state.authUserRole === 'owner') endpoints.push('/api/account/security', '/api/platform/users')
@@ -23,10 +27,25 @@ export async function bootKowope() {
       return response.json()
     }
     const readResponse = async (responseResult, endpoint, fallback) => responseResult.status === 'fulfilled' ? parseJsonResponse(responseResult.value, endpoint).catch(error => { console.error(`Kowope API request failed: ${endpoint}`, error); return fallback }) : (console.error(`Kowope API request failed: ${endpoint}`, responseResult.reason), fallback)
-    const [clients, invoices, businessProfile, integrationRecords, paymentRecords, recurringRecords, currencies] = await Promise.all([
+    const readBusinessProfiles = async responseResult => {
+      if (responseResult.status !== 'fulfilled') {
+        console.error('Kowope API request failed: /api/business-profile', responseResult.reason)
+        return []
+      }
+
+      const response = responseResult.value
+      return parseJsonResponse(response, '/api/business-profile').then(profile => {
+        // An account without a saved business profile is a valid empty state.
+        return profile && typeof profile === 'object' && Object.keys(profile).length ? [profile] : []
+      }).catch(error => {
+        console.error('Kowope API request failed: /api/business-profile', error)
+        return []
+      })
+    }
+    const [clients, invoices, businessProfiles, integrationRecords, paymentRecords, recurringRecords, currencies] = await Promise.all([
       readResponse(responses[0], '/api/clients', []),
       readResponse(responses[1], '/api/invoices', []),
-      readResponse(responses[2], '/api/business-profile', {}),
+      readBusinessProfiles(responses[2]),
       readResponse(responses[3], '/api/integrations', []),
       readResponse(responses[4], '/api/payments', []),
       readResponse(responses[5], '/api/recurring', []),
@@ -39,14 +58,15 @@ export async function bootKowope() {
       state.platformUsers = await readResponse(responses[9], '/api/platform/users', [])
     }
     currencies.forEach(currency => { currencySigns[currency.code] = currency.sign; currencyNames[currency.code] = currency.name })
-    state.defaultCurrency = businessProfile.default_currency || 'USD'
+    const firstBusinessProfile = businessProfiles[0] || {}
+    state.defaultCurrency = firstBusinessProfile.default_currency || 'USD'
     state.clientNames = clients.map(clientRecord => clientRecord.name)
     state.clientIds = clients.map(clientRecord => clientRecord.id)
     state.clientDetails = clients.map(clientRecord => ({ e: clientRecord.email, p: clientRecord.phone || '', a: clientRecord.address || '' }))
     state.invoices = invoices.map(invoiceRecord => ({ id: invoiceRecord.number, c: Math.max(0, clients.findIndex(clientRecord => clientRecord.id === invoiceRecord.client_id)), a: Number(invoiceRecord.amount), due: invoiceRecord.due_date || '', s: invoiceRecord.status, rec: false, cur: invoiceRecord.currency || 'USD', n: invoiceRecord.payment_instructions || '' }))
     state.payments = paymentRecords.map(paymentRecord => ({ d: paymentRecord.date, inv: paymentRecord.invoice_number || paymentRecord.invoice_id, c: Math.max(0, clients.findIndex(clientRecord => clientRecord.id === paymentRecord.client_id)), m: paymentRecord.method || paymentRecord.source || 'Manual', a: Number(paymentRecord.amount) }))
     state.recurringServices = recurringRecords.map(scheduleRecord => ({ id: scheduleRecord.id, c: Math.max(0, clients.findIndex(clientRecord => clientRecord.id === scheduleRecord.client_id)), a: Number(scheduleRecord.current_amount || 0), d: scheduleRecord.description, f: scheduleRecord.frequency, next: scheduleRecord.next_run_at, st: scheduleRecord.status === 'active' ? 'Active' : 'Paused', auto: scheduleRecord.auto_send, src: scheduleRecord.source_invoice_id }))
-    state.businessProfiles = businessProfile.name ? [{ n: businessProfile.name, a: businessProfile.address || '', e: businessProfile.email || '', p: businessProfile.phone || '', paymentInstructions: businessProfile.payment_instructions || '', invoicePrefix: businessProfile.invoice_prefix || 'INV-', invoicePadding: businessProfile.invoice_number_padding || 4, invoiceFormat: businessProfile.invoice_number_format || '{PREFIX}{YYYY}-{NUMBER}', preferredEmailProvider: businessProfile.preferred_email_provider || '' }] : [{ n: 'Your business', a: '', e: '', p: '', paymentInstructions: '', invoicePrefix: 'INV-', invoicePadding: 4, invoiceFormat: '{PREFIX}{YYYY}-{NUMBER}', preferredEmailProvider: '' }]
+    state.businessProfiles = businessProfiles.length ? businessProfiles.map(businessProfile => ({ id: businessProfile.id, n: businessProfile.name || 'Your business', a: businessProfile.address || '', e: businessProfile.email || '', p: businessProfile.phone || '', paymentInstructions: businessProfile.payment_instructions || '', invoicePrefix: businessProfile.invoice_prefix || 'INV-', invoicePadding: businessProfile.invoice_number_padding || 4, invoiceFormat: businessProfile.invoice_number_format || '{PREFIX}{YYYY}-{NUMBER}', preferredEmailProvider: businessProfile.preferred_email_provider || '', logoDataUrl: businessProfile.logo_data_url || '' })) : [{ n: 'Your business', a: '', e: '', p: '', paymentInstructions: '', invoicePrefix: 'INV-', invoicePadding: 4, invoiceFormat: '{PREFIX}{YYYY}-{NUMBER}', preferredEmailProvider: '', logoDataUrl: '' }]
     // Integration status is platform-global. Every authenticated user may see
     // the status, while the API withholds configuration secrets from nonowners.
     // Only known provider rows are mapped; a missing row means Off.

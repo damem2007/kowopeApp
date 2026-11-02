@@ -1,7 +1,7 @@
 import { state } from '../modules/store.js'
 import { currencySigns, currencyNames } from '../modules/catalog.js'
 import { $ } from '../modules/selectors.js'
-import { toast } from '../ui/render.js'
+import { render, toast } from '../ui/render.js'
 
 const readApiResponse = async response => {
   const contentType = response.headers.get('content-type') || ''
@@ -16,8 +16,10 @@ const readApiResponse = async response => {
 }
 
 export const saveBiz = async () => {
-  const existingBusiness = state.businessProfiles[0] || {}
+  const businessIndex = state.be >= 0 ? state.be : state.businessProfiles.length
+  const existingBusiness = state.businessProfiles[businessIndex] || {}
   const business = {
+    profileId: existingBusiness.id || null,
     name: $("#bn").value.trim(),
     address: $("#ba").value,
     email: $("#be").value,
@@ -28,6 +30,7 @@ export const saveBiz = async () => {
     invoiceNumberFormat: existingBusiness.invoiceFormat || '{PREFIX}{YYYY}-{NUMBER}',
     preferredEmailProvider: existingBusiness.preferredEmailProvider || null,
     defaultCurrency: state.defaultCurrency,
+    ...(state.businessLogoDraft === undefined ? {} : { logoDataUrl: state.businessLogoDraft }),
   }
   if (!business.name) return
 
@@ -40,6 +43,7 @@ export const saveBiz = async () => {
     const savedBusiness = await readApiResponse(response)
 
     const localBusiness = {
+      id: savedBusiness.id,
       n: savedBusiness.name,
       a: savedBusiness.address || '',
       e: savedBusiness.email || '',
@@ -49,15 +53,37 @@ export const saveBiz = async () => {
       invoicePadding: savedBusiness.invoice_number_padding || 4,
       invoiceFormat: savedBusiness.invoice_number_format || existingBusiness.invoiceFormat || '{PREFIX}{YYYY}-{NUMBER}',
       preferredEmailProvider: savedBusiness.preferred_email_provider || existingBusiness.preferredEmailProvider || '',
+      logoDataUrl: savedBusiness.logo_data_url || '',
     }
-    if (state.businessProfiles.length) state.businessProfiles[0] = localBusiness
+    if (state.businessProfiles[businessIndex]) state.businessProfiles[businessIndex] = localBusiness
     else state.businessProfiles.push(localBusiness)
-    if (state.invoiceEditor) state.invoiceEditor.businessIndex = 0
+    if (state.invoiceEditor && state.be < 0) state.invoiceEditor.businessIndex = state.businessProfiles.length - 1
+    state.businessLogoDraft = undefined
     state.activeModal = null
+    render()
     toast(localBusiness.n + " saved")
   } catch (error) {
     toast(error.message)
   }
+}
+
+export const uploadBusinessLogo = input => {
+  const file = input.files?.[0]
+  if (!file) return
+  if (file.size > 512 * 1024) {
+    input.value = ''
+    return toast('Logo must be 512 KB or smaller.', undefined, { error: true, persistent: true })
+  }
+  if (!/^image\/(png|jpe?g|webp)$/i.test(file.type)) {
+    input.value = ''
+    return toast('Upload a PNG, JPG or WEBP logo.', undefined, { error: true, persistent: true })
+  }
+  const reader = new FileReader()
+  reader.onload = () => {
+    state.businessLogoDraft = reader.result
+    render()
+  }
+  reader.readAsDataURL(file)
 }
 
 export const saveInvoiceNumbering = async () => {
@@ -68,7 +94,7 @@ export const saveInvoiceNumbering = async () => {
   const supportedTokens = ['{PREFIX}', '{YYYY}', '{YY}', '{NUMBER}']
   if (![...invoiceFormat.matchAll(/\{[A-Z]+\}/g)].every(match => supportedTokens.includes(match[0]))) return toast('Use only the supported invoice format tokens.')
   try {
-    const response = await fetch('/api/business-profile', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: existingBusiness.n || '', address: existingBusiness.a || '', email: existingBusiness.e || '', phone: existingBusiness.p || '', paymentInstructions: existingBusiness.paymentInstructions || '', invoicePrefix, invoiceNumberPadding: invoicePadding, invoiceNumberFormat: invoiceFormat, preferredEmailProvider: existingBusiness.preferredEmailProvider || null, defaultCurrency: state.defaultCurrency }) })
+    const response = await fetch('/api/business-profile', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ profileId: existingBusiness.id || null, name: existingBusiness.n || '', address: existingBusiness.a || '', email: existingBusiness.e || '', phone: existingBusiness.p || '', paymentInstructions: existingBusiness.paymentInstructions || '', invoicePrefix, invoiceNumberPadding: invoicePadding, invoiceNumberFormat: invoiceFormat, preferredEmailProvider: existingBusiness.preferredEmailProvider || null, defaultCurrency: state.defaultCurrency }) })
     const savedBusiness = await readApiResponse(response)
     state.businessProfiles[0] = { ...existingBusiness, invoicePrefix: savedBusiness.invoice_prefix || invoicePrefix, invoicePadding: savedBusiness.invoice_number_padding || invoicePadding, invoiceFormat: savedBusiness.invoice_number_format || invoiceFormat }
     toast('Invoice numbering saved')
@@ -103,7 +129,7 @@ export const delCur = async currencyCode => { try { const response = await fetch
 export const setDefaultCurrency = async currencyCode => {
   const businessProfile = state.businessProfiles[0] || {}
   try {
-    const response = await fetch('/api/business-profile', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: businessProfile.n || '', address: businessProfile.a || '', email: businessProfile.e || '', phone: businessProfile.p || '', paymentInstructions: businessProfile.paymentInstructions || '', invoicePrefix: businessProfile.invoicePrefix || 'INV-', invoiceNumberPadding: businessProfile.invoicePadding || 4, invoiceNumberFormat: businessProfile.invoiceFormat || '{PREFIX}{YYYY}-{NUMBER}', preferredEmailProvider: businessProfile.preferredEmailProvider || null, defaultCurrency: currencyCode }) })
+    const response = await fetch('/api/business-profile', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ profileId: businessProfile.id || null, name: businessProfile.n || '', address: businessProfile.a || '', email: businessProfile.e || '', phone: businessProfile.p || '', paymentInstructions: businessProfile.paymentInstructions || '', invoicePrefix: businessProfile.invoicePrefix || 'INV-', invoiceNumberPadding: businessProfile.invoicePadding || 4, invoiceNumberFormat: businessProfile.invoiceFormat || '{PREFIX}{YYYY}-{NUMBER}', preferredEmailProvider: businessProfile.preferredEmailProvider || null, defaultCurrency: currencyCode }) })
     const savedBusiness = await response.json()
     if (!response.ok) throw new Error(savedBusiness.error || 'Unable to save default currency')
     state.defaultCurrency = savedBusiness.default_currency || currencyCode

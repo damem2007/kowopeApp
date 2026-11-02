@@ -1,6 +1,8 @@
 import { encryptValue } from '../security/crypto.js'
 import { randomUUID } from 'node:crypto'
 
+import crypto from 'node:crypto'
+
 const migrations = [
   {
     version: 1,
@@ -536,6 +538,65 @@ const migrations = [
     description: 'Normalize integrations as platform-global owner-managed records',
     apply(db) {
       db.exec('UPDATE integrations SET organization_id = NULL, user_id = NULL')
+    },
+  },
+  {
+    version: 32,
+    description: 'Add guest analytics, business logos, and email template storage',
+    apply(db) {
+      const columns = db.prepare('PRAGMA table_info(business_profile)').all()
+      if (!columns.some(column => column.name === 'logo_data_url')) db.exec('ALTER TABLE business_profile ADD COLUMN logo_data_url TEXT NOT NULL DEFAULT \'\'')
+      db.exec(`CREATE TABLE IF NOT EXISTS guest_analytics (
+        id TEXT PRIMARY KEY,
+        account_key TEXT NOT NULL DEFAULT 'guest',
+        session_id TEXT NOT NULL,
+        event TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )`)
+      db.exec('CREATE INDEX IF NOT EXISTS idx_guest_analytics_session ON guest_analytics(session_id)')
+      db.exec(`CREATE TABLE IF NOT EXISTS email_templates (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        template_key TEXT NOT NULL,
+        subject TEXT NOT NULL,
+        body TEXT NOT NULL,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(user_id, template_key)
+      )`)
+      db.exec(`CREATE TABLE IF NOT EXISTS platform_email_templates (
+        id TEXT PRIMARY KEY,
+        template_key TEXT NOT NULL UNIQUE,
+        subject TEXT NOT NULL,
+        body TEXT NOT NULL,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )`)
+      const insertPlatformTemplate = db.prepare('INSERT OR IGNORE INTO platform_email_templates (id, template_key, subject, body) VALUES (?, ?, ?, ?)')
+      insertPlatformTemplate.run(crypto.randomUUID(), 'invoice', '{{invoice_number}} from {{business_name}}', 'Hi {{client}}, invoice {{invoice_number}} for {{amount}} is due {{due_date}}.')
+      insertPlatformTemplate.run(crypto.randomUUID(), 'password_reset', 'Reset your Kowope password', 'Use this link to reset your password: {{reset_link}}')
+      insertPlatformTemplate.run(crypto.randomUUID(), 'email_verification', 'Verify your Kowope email', 'Verify your email using this link: {{verification_link}}')
+    },
+  },
+  {
+    version: 33,
+    description: 'Allow business logos to be explicitly removed',
+    apply(db) {
+      db.exec('PRAGMA foreign_keys = OFF')
+      db.exec('ALTER TABLE business_profile RENAME TO business_profile_legacy')
+      db.exec(`CREATE TABLE business_profile (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL DEFAULT '', address TEXT NOT NULL DEFAULT '', email TEXT NOT NULL DEFAULT '', phone TEXT NOT NULL DEFAULT '',
+        payment_instructions TEXT NOT NULL DEFAULT '', invoice_prefix TEXT NOT NULL DEFAULT 'INV-', invoice_number_padding INTEGER NOT NULL DEFAULT 4,
+        invoice_number_format TEXT NOT NULL DEFAULT '{PREFIX}{YYYY}-{NUMBER}', preferred_email_provider TEXT, default_currency TEXT NOT NULL DEFAULT 'USD',
+        allow_user_signup INTEGER NOT NULL DEFAULT 0, organization_id INTEGER REFERENCES organizations(id), user_id TEXT REFERENCES users(id),
+        logo_data_url TEXT DEFAULT NULL
+      )`)
+      db.exec(`INSERT INTO business_profile (id, name, address, email, phone, payment_instructions, invoice_prefix, invoice_number_padding, invoice_number_format, preferred_email_provider, default_currency, allow_user_signup, organization_id, user_id, logo_data_url)
+        SELECT id, name, address, email, phone, payment_instructions, invoice_prefix, invoice_number_padding, invoice_number_format, preferred_email_provider, default_currency, allow_user_signup, organization_id, user_id, NULLIF(logo_data_url, '')
+        FROM business_profile_legacy`)
+      db.exec('DROP TABLE business_profile_legacy')
+      db.exec('CREATE INDEX IF NOT EXISTS idx_business_profile_user_id ON business_profile(user_id)')
+      db.exec('CREATE INDEX IF NOT EXISTS idx_business_profile_organization_id ON business_profile(organization_id)')
+      db.exec('PRAGMA foreign_keys = ON')
     },
   },
 ]

@@ -7,6 +7,24 @@ import { render, toast } from '../ui/render.js'
 import { sample, calc } from '../pages/editor.js'
 import { wiz } from './integrations.js'
 
+export const uploadInvoiceLogo = input => {
+  const file = input?.files?.[0]
+  if (!file) return
+  if (file.size > 512 * 1024) return toast('Logo must be 512 KB or smaller.')
+  if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) return toast('Logo must be a PNG, JPG, or WEBP image.')
+  const reader = new FileReader()
+  reader.onload = () => { state.invoiceEditor.logoDataUrl = reader.result; state.invoiceEditor.logoRemoved = false; render() }
+  reader.onerror = () => toast('Unable to read the logo file.')
+  reader.readAsDataURL(file)
+}
+
+export const removeInvoiceLogo = () => {
+  if (!state.invoiceEditor) return
+  state.invoiceEditor.logoDataUrl = ''
+  state.invoiceEditor.logoRemoved = true
+  render()
+}
+
 export function newInv() { state.invoiceEditor = sample(); state.currentRoute = "new"; render(); scrollTo(0, 0) }
 
 export const editDraft = async id => {
@@ -103,7 +121,9 @@ export const downloadInvoice = async id => {
 
 export const downloadPreviewPdf = async () => {
   const editor = state.invoiceEditor, totals = calc(), clientDetails = editor.clientIndex !== '' ? state.clientDetails[editor.clientIndex] : {}
-  const response = await fetch('/api/invoices/preview/pdf', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ number: `INV-000${state.invoices.length + 1}`, clientName: editor.clientIndex !== '' ? state.clientNames[editor.clientIndex] : 'Client', clientEmail: clientDetails.e || '', clientAddress: clientDetails.a || '', description: editor.items.filter(item => item.d || item.p > 0).map(item => item.d || 'Line item').join(', '), lineItems: editor.items.filter(item => item.d || item.p > 0).map(item => ({ description: item.d, quantity: item.q, unitPrice: item.p })), amount: totals.tot, currency: editor.cur, dueDate: editor.due, paymentInstructions: editor.n, business: state.businessProfiles[editor.businessIndex] }) })
+  const businessProfile = state.businessProfiles[editor.businessIndex] || {}
+  const invoiceLogo = editor.logoDataUrl || (!editor.logoRemoved ? businessProfile.logoDataUrl || '' : '')
+  const response = await fetch('/api/invoices/preview/pdf', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ number: `INV-000${state.invoices.length + 1}`, clientName: editor.clientIndex !== '' ? state.clientNames[editor.clientIndex] : 'Client', clientEmail: clientDetails.e || '', clientAddress: clientDetails.a || '', description: editor.items.filter(item => item.d || item.p > 0).map(item => item.d || 'Line item').join(', '), lineItems: editor.items.filter(item => item.d || item.p > 0).map(item => ({ description: item.d, quantity: item.q, unitPrice: item.p })), amount: totals.tot, currency: editor.cur, dueDate: editor.due, paymentInstructions: editor.n, business: { ...businessProfile, logoDataUrl: invoiceLogo } }) })
   if (!response.ok) return toast('Unable to generate PDF')
   saveBlob(await response.blob(), `INV-000${state.invoices.length + 1}.pdf`)
   toast('PDF downloaded')
@@ -116,6 +136,8 @@ export async function save(mode) {
   editor.err = errors
   if (errors.length) return toast(errors.join(' '))
   const total = calc().tot
+  const businessProfile = state.businessProfiles[editor.businessIndex] || {}
+  const invoiceLogo = editor.logoDataUrl || (!editor.logoRemoved ? businessProfile.logoDataUrl || '' : '')
   const payload = { clientId: state.clientIds?.[Number(editor.clientIndex)], description: editor.items.filter(item => item.d || item.p > 0).map(item => item.d || 'Line item').join(', '), lineItems: editor.items.filter(item => item.d || item.p > 0).map(item => ({ description: item.d, quantity: item.q, unitPrice: item.p })), amount: total, dueDate: editor.due || null, currency: editor.cur, paymentInstructions: editor.n }
   const response = await fetch(editor.invoiceId ? `/api/invoices/${encodeURIComponent(editor.invoiceId)}` : '/api/invoices', { method: editor.invoiceId ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
   const invoice = await response.json()
@@ -132,12 +154,12 @@ export async function save(mode) {
     state.invoices.push({ id: invoice.number, c: Number(editor.clientIndex), a: total, due: editor.due || '', s: invoice.status || 'Draft', rec: false, cur: editor.cur, n: editor.n })
   }
   if (mode === 'pdf') {
-    const pdf = await fetch(`/api/invoices/${invoice.number}/pdf`)
+    const pdf = await fetch('/api/invoices/preview/pdf', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ number: invoice.number, clientName: state.clientNames[editor.clientIndex], clientEmail: state.clientDetails[editor.clientIndex]?.e || '', clientAddress: state.clientDetails[editor.clientIndex]?.a || '', description: payload.description, lineItems: payload.lineItems, amount: total, currency: editor.cur, dueDate: editor.due, paymentInstructions: editor.n, business: { ...businessProfile, logoDataUrl: invoiceLogo } }) })
     if (!pdf.ok) return toast('Invoice saved, but the PDF could not be generated.')
     saveBlob(await pdf.blob(), `${invoice.number}.pdf`)
   }
   if (mode === 'send') {
-    const sendResponse = await fetch(`/api/invoices/${encodeURIComponent(invoice.number)}/send`, { method: 'POST' })
+    const sendResponse = await fetch(`/api/invoices/${encodeURIComponent(invoice.number)}/send`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ logoDataUrl: invoiceLogo }) })
     const sendResult = await sendResponse.json()
     if (!sendResponse.ok) return toast(sendResult.error || 'Invoice saved as draft, but it could not be sent.')
     const sentInvoice = state.invoices.find(item => item.id === invoice.number)

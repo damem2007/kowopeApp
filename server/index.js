@@ -16,18 +16,41 @@ dotenv.config();
 const app = express();
 const port = process.env.PORT || 3001;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-app.use(express.json());
+// Logo data URLs are sent as JSON. Keep the API parser above the 512 KB
+// binary-logo limit because base64 encoding increases the request size.
+app.use(express.json({ limit: '1mb' }));
 const db = initializeDatabase();
 const databasePath = path.join(__dirname, '../data/invoices.db');
 startBackupService(db, databasePath);
-const getBusinessProfile = (organizationId = null) => decryptFields(db.prepare('SELECT * FROM business_profile WHERE organization_id = ? ORDER BY id LIMIT 1').get(organizationId), businessFields);
-const getScopedBusinessProfile = user => decryptFields(
-  db.prepare(user.organization_id
-    ? 'SELECT * FROM business_profile WHERE organization_id = ? ORDER BY id LIMIT 1'
-    : 'SELECT * FROM business_profile WHERE organization_id IS NULL AND user_id = ? ORDER BY id LIMIT 1'
-  ).get(user.organization_id || user.id),
-  businessFields,
-) || {};
+const getBusinessProfile = (organizationId = null, userId = null) => {
+  const profile = organizationId
+    ? db.prepare('SELECT * FROM business_profile WHERE organization_id = ? ORDER BY id LIMIT 1').get(organizationId)
+    : userId
+      ? db.prepare('SELECT * FROM business_profile WHERE organization_id IS NULL AND user_id = ? ORDER BY id LIMIT 1').get(userId)
+      : null;
+  return decryptFields(profile, businessFields);
+};
+const getScopedBusinessProfile = user => {
+  const profile = user.organization_id
+    ? db.prepare(`
+        SELECT * FROM business_profile
+        WHERE organization_id = ? OR (organization_id IS NULL AND user_id = ?)
+        ORDER BY CASE WHEN organization_id = ? THEN 0 ELSE 1 END, id
+        LIMIT 1
+      `).get(user.organization_id, user.id, user.organization_id)
+    : db.prepare('SELECT * FROM business_profile WHERE organization_id IS NULL AND user_id = ? ORDER BY id LIMIT 1').get(user.id)
+  return decryptFields(profile, businessFields) || {}
+};
+const getScopedBusinessProfiles = user => {
+  const rows = user.organization_id
+    ? db.prepare(`
+        SELECT * FROM business_profile
+        WHERE organization_id = ? OR (organization_id IS NULL AND user_id = ?)
+        ORDER BY CASE WHEN organization_id = ? THEN 0 ELSE 1 END, id
+      `).all(user.organization_id, user.id, user.organization_id)
+    : db.prepare('SELECT * FROM business_profile WHERE organization_id IS NULL AND user_id = ? ORDER BY id').all(user.id)
+  return rows.map(row => decryptFields(row, businessFields))
+};
 const getIntegrationConfig = integration => integration ? { ...integration, config_json: decryptValue(integration.config_json || '{}') } : integration;
 const decryptInvoice = invoice => decryptFields(invoice, invoiceFields);
 const decryptClient = client => decryptFields(client, clientFields);
@@ -35,6 +58,7 @@ const oauthStates = new Map();
 const sessions = new Map();
 const passwordResetTokens = new Map();
 const sessionCookie = 'kowope_session';
+const guestSessionCookie = 'kowope_guest_session';
 const hashPassword = (password, salt = crypto.randomBytes(16).toString('hex')) => `${salt}:${crypto.scryptSync(password, salt, 64).toString('hex')}`;
 const hashToken = token => crypto.createHash('sha256').update(token).digest('hex');
 const verifyPassword = (password, storedHash) => { const [salt, hash] = storedHash.split(':'); const candidate = crypto.scryptSync(password, salt, 64); return crypto.timingSafeEqual(candidate, Buffer.from(hash, 'hex')); };
@@ -42,7 +66,28 @@ const readSession = req => { const cookie = req.headers.cookie?.split(';').map(v
 const sessionUser = req => { const userId = readSession(req); return userId ? db.prepare('SELECT u.id, u.email, u.role, m.organization_id FROM users u LEFT JOIN organization_members m ON m.user_id = u.id WHERE u.id = ?').get(userId) : null; };
 const requireOwner = (req, res, next) => { const user = sessionUser(req); if (!user) return res.status(401).json({ error: 'Authentication required.' }); if (user.role !== 'owner') return res.status(403).json({ error: 'Owner access required.' }); req.user = user; next(); };
 const requireAuthenticated = (req, res, next) => { const user = sessionUser(req); if (!user) return res.status(401).json({ error: 'Authentication required.' }); req.user = user; next(); };
+const guestSessionId = req => {
+  const cookie = req.headers.cookie?.split(';').map(value => value.trim()).find(value => value.startsWith(`${guestSessionCookie}=`));
+  if (cookie) return cookie.slice(guestSessionCookie.length + 1);
+  const sessionId = crypto.randomUUID();
+  req.res.setHeader('Set-Cookie', `${guestSessionCookie}=${sessionId}; SameSite=Lax; Path=/; Max-Age=86400`);
+  return sessionId;
+};
+const logGuestEvent = (req, event) => db.prepare('INSERT INTO guest_analytics (id, account_key, session_id, event) VALUES (?, ?, ?, ?)').run(crypto.randomUUID(), 'guest', guestSessionId(req), event);
 const getSecuritySettings = () => db.prepare('SELECT * FROM security_settings WHERE id = 1').get();
+const templateTokens = {
+  invoice: ['{{client}}', '{{business_name}}', '{{invoice_number}}', '{{amount}}', '{{due_date}}'],
+  password_reset: ['{{reset_link}}'],
+  email_verification: ['{{verification_link}}'],
+};
+const validateEmailTemplate = (templateKey, subject, body) => {
+  const content = `${subject || ''}\n${body || ''}`;
+  const missingTokens = (templateTokens[templateKey] || []).filter(token => !content.includes(token));
+  return missingTokens.length ? `Template must include: ${missingTokens.join(', ')}` : null;
+};
+const renderEmailTemplate = (template, values) => String(template || '').replace(/\{\{([a-z_]+)\}\}/g, (_match, token) => values[token] ?? '');
+const platformEmailTemplate = templateKey => db.prepare('SELECT * FROM platform_email_templates WHERE template_key = ?').get(templateKey);
+const userEmailTemplate = (userId, templateKey) => db.prepare('SELECT * FROM email_templates WHERE user_id = ? AND template_key = ?').get(userId, templateKey);
 const passwordPolicyError = password => { const settings = getSecuritySettings(); if (!settings?.configured_at) return null; if (password.length < settings.password_min_length) return `Password must be at least ${settings.password_min_length} characters.`; if (settings.require_uppercase && !/[A-Z]/.test(password)) return 'Password must include an uppercase letter.'; if (settings.require_lowercase && !/[a-z]/.test(password)) return 'Password must include a lowercase letter.'; if (settings.require_number && !/[0-9]/.test(password)) return 'Password must include a number.'; if (settings.require_symbol && !/[^A-Za-z0-9]/.test(password)) return 'Password must include a symbol.'; return null; };
 function ensureUserOrganizations() {
   const owner = db.prepare("SELECT id FROM users WHERE role = 'owner' ORDER BY id LIMIT 1").get()
@@ -391,8 +436,74 @@ app.put('/api/account/security', requireOwner, (req, res) => {
   db.prepare('UPDATE security_settings SET reset_token_minutes = ?, password_min_length = ?, require_uppercase = ?, require_lowercase = ?, require_number = ?, require_symbol = ?, configured_at = CURRENT_TIMESTAMP WHERE id = 1').run(resetTokenMinutes, passwordMinLength, password.requireUppercase ? 1 : 0, password.requireLowercase ? 1 : 0, password.requireNumber ? 1 : 0, password.requireSymbol ? 1 : 0);
   res.json({ backup: db.prepare('SELECT * FROM backup_settings WHERE id = 1').get(), password: getSecuritySettings() });
 });
+app.get('/api/email-templates', requireAuthenticated, (req, res) => {
+  const platformTemplate = platformEmailTemplate('invoice');
+  const personalTemplate = userEmailTemplate(req.user.id, 'invoice');
+  res.json({
+    templateKey: 'invoice',
+    subject: personalTemplate?.subject || platformTemplate?.subject || '{{invoice_number}} from {{business_name}}',
+    body: personalTemplate?.body || platformTemplate?.body || 'Hi {{client}}, invoice {{invoice_number}} for {{amount}} is due {{due_date}}.',
+    customized: Boolean(personalTemplate),
+    availableTokens: templateTokens.invoice,
+  });
+});
+app.put('/api/email-templates/:templateKey', requireAuthenticated, (req, res) => {
+  if (req.params.templateKey !== 'invoice') return res.status(400).json({ error: 'Only invoice templates can be customized by a user.' });
+  const subject = String(req.body.subject || '').trim();
+  const body = String(req.body.body || '').trim();
+  const validationError = validateEmailTemplate('invoice', subject, body);
+  if (!subject || !body) return res.status(400).json({ error: 'Subject and body are required.' });
+  if (validationError) return res.status(400).json({ error: validationError });
+  db.prepare(`INSERT INTO email_templates (id, user_id, template_key, subject, body, updated_at) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(user_id, template_key) DO UPDATE SET subject = excluded.subject, body = excluded.body, updated_at = CURRENT_TIMESTAMP`).run(crypto.randomUUID(), req.user.id, 'invoice', subject, body);
+  res.json({ ok: true, ...userEmailTemplate(req.user.id, 'invoice'), availableTokens: templateTokens.invoice });
+});
+app.post('/api/email-templates/:templateKey/preview', requireAuthenticated, (req, res) => {
+  if (req.params.templateKey !== 'invoice') return res.status(400).json({ error: 'Unsupported template.' });
+  const subject = String(req.body.subject || '');
+  const body = String(req.body.body || '');
+  const values = { client: 'Example client', business_name: 'Your business', invoice_number: 'INV-2026-0001', amount: 'USD 250.00', due_date: 'Dec 15, 2026' };
+  res.json({ subject: renderEmailTemplate(subject, values), body: renderEmailTemplate(body, values) });
+});
+app.get('/api/platform/email-templates', requireOwner, (_req, res) => res.json(db.prepare('SELECT template_key AS templateKey, subject, body, updated_at AS updatedAt FROM platform_email_templates ORDER BY template_key').all().map(template => ({ ...template, availableTokens: templateTokens[template.templateKey] || [] }))));
+app.put('/api/platform/email-templates/:templateKey', requireOwner, (req, res) => {
+  const templateKey = String(req.params.templateKey || '');
+  if (!templateTokens[templateKey]) return res.status(400).json({ error: 'Unsupported platform template.' });
+  const subject = String(req.body.subject || '').trim();
+  const body = String(req.body.body || '').trim();
+  const validationError = validateEmailTemplate(templateKey, subject, body);
+  if (!subject || !body) return res.status(400).json({ error: 'Subject and body are required.' });
+  if (validationError) return res.status(400).json({ error: validationError });
+  db.prepare('UPDATE platform_email_templates SET subject = ?, body = ?, updated_at = CURRENT_TIMESTAMP WHERE template_key = ?').run(subject, body, templateKey);
+  res.json({ ok: true, template: platformEmailTemplate(templateKey), availableTokens: templateTokens[templateKey] });
+});
+app.post('/api/platform/email-templates/:templateKey/preview', requireOwner, (req, res) => {
+  const templateKey = String(req.params.templateKey || '');
+  const values = { client: 'Example client', business_name: 'Your business', invoice_number: 'INV-2026-0001', amount: 'USD 250.00', due_date: 'Dec 15, 2026', reset_link: 'https://kowope.example/reset?token=example', verification_link: 'https://kowope.example/verify?token=example' };
+  const template = { subject: String(req.body.subject ?? platformEmailTemplate(templateKey)?.subject ?? ''), body: String(req.body.body ?? platformEmailTemplate(templateKey)?.body ?? '') };
+  if (!templateTokens[templateKey]) return res.status(400).json({ error: 'Unsupported platform template.' });
+  res.json({ subject: renderEmailTemplate(template.subject, values), body: renderEmailTemplate(template.body, values) });
+});
 app.post('/api/auth/logout', (req, res) => { const cookie = req.headers.cookie?.split(';').map(value => value.trim()).find(value => value.startsWith(`${sessionCookie}=`)); if (cookie) { const token = cookie.slice(sessionCookie.length + 1); sessions.delete(token); db.prepare('DELETE FROM auth_sessions WHERE token = ?').run(token); } res.setHeader('Set-Cookie', `${sessionCookie}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0`); res.status(204).end(); });
-app.use('/api', (req, res, next) => { if (req.path.startsWith('/auth/')) return next(); const user = sessionUser(req); if (!user) return res.status(401).json({ error: 'Authentication required.' }); req.user = user; next(); });
+app.post('/api/guest/session', (req, res) => { const sessionId = guestSessionId(req); logGuestEvent(req, 'session_started'); res.json({ ok: true, sessionId }); });
+const guestInvoicePayload = body => ({
+  number: String(body.number || 'GUEST-INVOICE'),
+  client_name: String(body.clientName || 'Client'),
+  client_email: String(body.clientEmail || ''),
+  client_address: String(body.clientAddress || ''),
+  description: String(body.description || 'Line item'),
+  lineItems: Array.isArray(body.lineItems) ? body.lineItems : [],
+  business: body.business ? { ...body.business, logo_data_url: String(body.business.logoDataUrl || body.business.logo_data_url || '') } : null,
+  amount: Number(body.amount || 0),
+  currency: String(body.currency || 'USD'),
+  due_date: body.dueDate || null,
+  created_at: new Date().toISOString(),
+  payment_instructions: String(body.paymentInstructions || ''),
+});
+app.post('/api/guest/invoices/preview/pdf', async (req, res) => { logGuestEvent(req, 'invoice_created'); const pdf = await createPdf(guestInvoicePayload(req.body)); logGuestEvent(req, 'invoice_generated'); res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': 'inline; filename="guest-invoice.pdf"' }).send(pdf); });
+app.post('/api/guest/invoices/download/pdf', async (req, res) => { const invoice = guestInvoicePayload(req.body); const pdf = await createPdf(invoice); logGuestEvent(req, 'invoice_downloaded'); res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="${invoice.number}.pdf"` }).send(pdf); });
+app.post('/api/guest/analytics', (req, res) => { const allowedEvents = new Set(['invoice_created', 'invoice_generated', 'invoice_downloaded']); const event = String(req.body.event || ''); if (!allowedEvents.has(event)) return res.status(400).json({ error: 'Unsupported guest event.' }); logGuestEvent(req, event); res.status(204).end(); });
+app.use('/api', (req, res, next) => { if (req.path.startsWith('/auth/') || req.path.startsWith('/guest/')) return next(); const user = sessionUser(req); if (!user) return res.status(401).json({ error: 'Authentication required.' }); req.user = user; next(); });
 app.post('/api/backups/run', async (_req, res) => { try { const result = await runManualBusinessBackup(db, databasePath); res.json(result); } catch (error) { res.status(502).json({ error: error.message }); } });
 app.get('/api/integrations', (req, res) => {
   const integrations = db.prepare('SELECT provider, status, account_label, config_json, connected_at, last_error FROM integrations ORDER BY provider').all()
@@ -479,6 +590,7 @@ app.post('/internal/cron/run', async (req, res) => {
 })
 
 app.get("/api/business-profile", (req, res) => res.json(getScopedBusinessProfile(req.user)));
+app.get('/api/business-profiles', (req, res) => res.json(getScopedBusinessProfiles(req.user)));
 app.get('/api/currencies', (req, res) => res.json(db.prepare('SELECT code, name, sign FROM currencies WHERE user_id IS NULL OR user_id = ? ORDER BY code').all(req.user.id)));
 app.post('/api/currencies', (req, res) => {
   const code = String(req.body.code || '').trim().toUpperCase();
@@ -491,7 +603,7 @@ app.post('/api/currencies', (req, res) => {
 app.delete('/api/currencies/:code', (req, res) => {
   const code = String(req.params.code || '').toUpperCase();
   if (code === 'USD') return res.status(400).json({ error: 'USD cannot be removed.' });
-  const defaultCurrency = db.prepare('SELECT default_currency FROM business_profile WHERE organization_id = ?').get(req.user.organization_id)?.default_currency;
+  const defaultCurrency = getScopedBusinessProfile(req.user).default_currency;
   if (code === defaultCurrency) return res.status(400).json({ error: 'Choose another default currency first.' });
   if (['USD', 'CAD', 'EUR'].includes(code)) return res.status(400).json({ error: 'System currencies cannot be removed.' });
   db.prepare('DELETE FROM currencies WHERE code = ? AND user_id = ?').run(code, req.user.id); res.status(204).end();
@@ -509,14 +621,41 @@ app.put("/api/business-profile", (req, res) => {
     invoiceNumberFormat = "{PREFIX}{YYYY}-{NUMBER}",
     preferredEmailProvider = null,
     defaultCurrency = 'USD',
+    logoDataUrl,
+    profileId = null,
   } = req.body;
-  const profileScope = req.user.organization_id
-    ? { clause: 'organization_id = ?', value: req.user.organization_id }
-    : { clause: 'organization_id IS NULL AND user_id = ?', value: req.user.id };
-  db.prepare(
-    `UPDATE business_profile SET name = ?, address = ?, email = ?, phone = ?, payment_instructions = ?, invoice_prefix = ?, invoice_number_padding = ?, invoice_number_format = ?, preferred_email_provider = ?, default_currency = ? WHERE ${profileScope.clause}`,
-  ).run(encryptValue(name), encryptValue(address), encryptValue(email), encryptValue(phone), encryptValue(paymentInstructions), invoicePrefix, Math.min(10, Math.max(1, Number(invoiceNumberPadding) || 4)), invoiceNumberFormat || '{PREFIX}{YYYY}-{NUMBER}', preferredEmailProvider, defaultCurrency, profileScope.value);
-  res.json(getScopedBusinessProfile(req.user));
+  const logoWasProvided = Object.prototype.hasOwnProperty.call(req.body, 'logoDataUrl');
+  const logoValue = logoDataUrl === null ? null : (logoWasProvided ? String(logoDataUrl || '') : null);
+  if (logoValue !== null && Buffer.byteLength(logoValue, 'utf8') > 512 * 1024) return res.status(400).json({ error: 'Logo must be 512 KB or smaller.' });
+  try {
+    const defaultScopeColumn = req.user.organization_id ? 'organization_id' : 'user_id';
+    const defaultScopeValue = req.user.organization_id || req.user.id;
+    const existing = profileId
+      ? db.prepare(`
+          SELECT id, organization_id, user_id
+          FROM business_profile
+          WHERE id = ?
+            AND (organization_id = ? OR (organization_id IS NULL AND user_id = ?))
+        `).get(profileId, req.user.organization_id || null, req.user.id)
+      : null;
+    const scopeColumn = existing ? (existing.organization_id ? 'organization_id' : 'user_id') : defaultScopeColumn;
+    const scopeValue = existing ? (existing.organization_id || existing.user_id) : defaultScopeValue;
+    const values = [encryptValue(name), encryptValue(address), encryptValue(email), encryptValue(phone), encryptValue(paymentInstructions), invoicePrefix, Math.min(10, Math.max(1, Number(invoiceNumberPadding) || 4)), invoiceNumberFormat || '{PREFIX}{YYYY}-{NUMBER}', preferredEmailProvider, defaultCurrency];
+    let savedProfileId = existing?.id;
+    if (savedProfileId) {
+      const logoUpdate = logoWasProvided ? ', logo_data_url = ?' : '';
+      const updateValues = logoWasProvided ? [...values, logoValue, savedProfileId, scopeValue] : [...values, savedProfileId, scopeValue];
+      db.prepare(`UPDATE business_profile SET name = ?, address = ?, email = ?, phone = ?, payment_instructions = ?, invoice_prefix = ?, invoice_number_padding = ?, invoice_number_format = ?, preferred_email_provider = ?, default_currency = ?${logoUpdate} WHERE id = ? AND ${scopeColumn} = ?`).run(...updateValues);
+    } else {
+      const result = db.prepare(`INSERT INTO business_profile (organization_id, user_id, name, address, email, phone, payment_instructions, invoice_prefix, invoice_number_padding, invoice_number_format, preferred_email_provider, default_currency, logo_data_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(req.user.organization_id || null, req.user.organization_id ? null : req.user.id, ...values, logoWasProvided ? logoValue : null);
+      savedProfileId = result.lastInsertRowid;
+    }
+    const savedProfile = db.prepare('SELECT * FROM business_profile WHERE id = ?').get(savedProfileId);
+    res.json(decryptFields(savedProfile, businessFields));
+  } catch (error) {
+    console.error('Business profile update failed:', error);
+    res.status(500).json({ error: 'Unable to save the business profile.' });
+  }
 });
 app.get("/api/clients", (req, res) =>
   res.json(
@@ -676,9 +815,11 @@ app.post("/api/invoices", (req, res) => {
       .json({
         error: "Select a client or enter the recipient name and email.",
       });
-  const next =
-    db.prepare("SELECT COUNT(*) AS count FROM invoices WHERE organization_id = ?").get(req.user.organization_id).count + 1;
-  const businessProfile = db.prepare('SELECT invoice_prefix, invoice_number_padding, invoice_number_format FROM business_profile WHERE organization_id = ?').get(req.user.organization_id) || { invoice_prefix: 'INV-', invoice_number_padding: 4, invoice_number_format: '{PREFIX}{YYYY}-{NUMBER}' };
+  const invoiceScope = req.user.organization_id
+    ? { column: 'organization_id', value: req.user.organization_id }
+    : { column: 'user_id', value: req.user.id };
+  const next = db.prepare(`SELECT COUNT(*) AS count FROM invoices WHERE ${invoiceScope.column} = ?`).get(invoiceScope.value).count + 1;
+  const businessProfile = getScopedBusinessProfile(req.user);
   const invoicePrefix = businessProfile.invoice_prefix || 'INV-';
   const invoicePadding = Math.min(10, Math.max(1, Number(businessProfile.invoice_number_padding) || 4));
   const numberFormat = businessProfile.invoice_number_format || '{PREFIX}{YYYY}-{NUMBER}';
@@ -760,7 +901,8 @@ function createPdf(invoice) {
   return new Promise((resolve) => {
     const chunks = [];
     const doc = new PDFDocument({ margin: 55 });
-    const business = invoice.business ? decryptFields(invoice.business, businessFields) : getBusinessProfile(invoice.organization_id) || {};
+    const business = invoice.business ? decryptFields(invoice.business, businessFields) : getBusinessProfile(invoice.organization_id, invoice.user_id) || {};
+    const logoDataUrl = invoice.business?.logoDataUrl || invoice.business?.logo_data_url || business.logo_data_url || '';
     const lineItems = invoice.lineItems || (invoice.id ? db.prepare('SELECT description, quantity, unit_price AS unitPrice FROM line_items WHERE invoice_id = ? ORDER BY id').all(invoice.id).map(item => ({ ...item, description: decryptValue(item.description) })) : []);
     const items = lineItems.length ? lineItems : [{ description: invoice.description || 'Line item', quantity: 1, unitPrice: Number(invoice.amount) || 0 }];
     const subtotal = items.reduce((sum, item) => sum + Number(item.quantity || 1) * Number(item.unitPrice || 0), 0);
@@ -769,7 +911,11 @@ function createPdf(invoice) {
     doc.on("data", (chunk) => chunks.push(chunk));
     doc.on("end", () => resolve(Buffer.concat(chunks)));
     const left = 55, right = 540, width = right - left;
-    doc.font('Times-Bold').fontSize(25).fillColor('#1b1a24').text(business.name || 'Your business', left, 55);
+    if (/^data:image\/(png|jpe?g|webp);base64,/i.test(logoDataUrl)) {
+      try { doc.image(Buffer.from(logoDataUrl.split(',')[1], 'base64'), left, 48, { fit: [42, 42] }); } catch { /* invalid optional logo does not prevent invoice generation */ }
+    }
+    const businessNameX = logoDataUrl ? left + 52 : left;
+    doc.font('Times-Bold').fontSize(25).fillColor('#1b1a24').text(business.name || 'Your business', businessNameX, 55);
     doc.font('Times-Roman').fontSize(10).fillColor('#5f5c6e').text([business.address, business.email, business.phone].filter(Boolean).join('\n'), left, 88, { width: 210 });
     doc.font('Times-Bold').fontSize(30).fillColor('#1b1a24').text('INVOICE', 370, 55, { width: 170, align: 'right' });
     doc.font('Times-Roman').fontSize(11).fillColor('#5f5c6e').text(`No. ${invoice.number}`, 370, 92, { width: 170, align: 'right' });
@@ -816,28 +962,26 @@ app.post("/api/invoices/:id/send", async (req, res) => {
     .prepare("SELECT i.*, c.address AS client_address FROM invoices i LEFT JOIN clients c ON c.id = i.client_id WHERE i.organization_id = ? AND (i.id = ? OR i.number = ?)")
     .get(req.user.organization_id, req.params.id, req.params.id));
   if (!invoice) return res.status(404).json({ error: "Invoice not found." });
-  const preferredProvider = db.prepare('SELECT preferred_email_provider FROM business_profile WHERE organization_id = ?').get(invoice.organization_id)?.preferred_email_provider;
+  const preferredProvider = getBusinessProfile(invoice.organization_id, invoice.user_id).preferred_email_provider;
   const emailIntegration = db.prepare("SELECT * FROM integrations WHERE provider IN ('mailjet', 'outlook', 'gmail') AND status = 'connected' ORDER BY CASE WHEN provider = ? THEN 0 WHEN provider = 'mailjet' THEN 1 WHEN provider = 'outlook' THEN 2 WHEN provider = 'gmail' THEN 3 ELSE 4 END, connected_at DESC LIMIT 1").get(preferredProvider || '');
   const savedMailConfig = emailIntegration ? JSON.parse(decryptValue(emailIntegration.config_json || '{}')) : {};
-  const businessProfile = getBusinessProfile(invoice.organization_id) || {};
+  const businessProfile = getBusinessProfile(invoice.organization_id, invoice.user_id) || {};
+  const transientLogoDataUrl = typeof req.body?.logoDataUrl === 'string' ? req.body.logoDataUrl : '';
+  const invoiceForDelivery = transientLogoDataUrl
+    ? { ...invoice, business: { ...businessProfile, logoDataUrl: transientLogoDataUrl } }
+    : invoice;
   const businessName = businessProfile.name || process.env.BUSINESS_NAME || 'Your business';
-  const templateMessage = (savedMailConfig.message || 'Hi {{client}}, invoice {{invoice_number}} for {{amount}} is due {{due_date}}.')
-    .replaceAll('{{client}}', invoice.client_name || 'there')
-    .replaceAll('{{invoice_number}}', invoice.number)
-    .replaceAll('{{amount}}', `${invoice.currency || 'USD'} ${Number(invoice.amount || 0).toFixed(2)}`)
-    .replaceAll('{{due_date}}', invoice.due_date || 'the due date');
-  const templateSubject = (savedMailConfig.subject || '{{invoice_number}} from {{business_name}}')
-    .replaceAll('{{client}}', invoice.client_name || 'there')
-    .replaceAll('{{invoice_number}}', invoice.number)
-    .replaceAll('{{amount}}', `${invoice.currency || 'USD'} ${Number(invoice.amount || 0).toFixed(2)}`)
-    .replaceAll('{{due_date}}', invoice.due_date || 'the due date')
-    .replaceAll('{{business_name}}', businessName);
+  const userTemplate = userEmailTemplate(req.user.id, 'invoice');
+  const platformTemplate = platformEmailTemplate('invoice');
+  const templateValues = { client: invoice.client_name || 'there', invoice_number: invoice.number, amount: `${invoice.currency || 'USD'} ${Number(invoice.amount || 0).toFixed(2)}`, due_date: invoice.due_date || 'the due date', business_name: businessName };
+  const templateMessage = renderEmailTemplate(userTemplate?.body || platformTemplate?.body || savedMailConfig.message || 'Hi {{client}}, invoice {{invoice_number}} for {{amount}} is due {{due_date}}.', templateValues);
+  const templateSubject = renderEmailTemplate(userTemplate?.subject || platformTemplate?.subject || savedMailConfig.subject || '{{invoice_number}} from {{business_name}}', templateValues);
   const smtpHost = savedMailConfig.host || process.env.SMTP_HOST;
   const smtpUser = savedMailConfig.emailAddress || process.env.SMTP_USER;
   const smtpPass = savedMailConfig.smtpPassword || process.env.SMTP_PASS;
   if (emailIntegration?.provider === 'outlook' && savedMailConfig.authType === 'oauth2') {
     try {
-      const pdf = await createPdf(invoice);
+      const pdf = await createPdf(invoiceForDelivery);
       const graphResponse = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', { method: 'POST', headers: { Authorization: `Bearer ${savedMailConfig.accessToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ message: { subject: templateSubject, body: { contentType: 'Text', content: templateMessage }, toRecipients: [{ emailAddress: { address: invoice.client_email } }], attachments: [{ '@odata.type': '#microsoft.graph.fileAttachment', name: `${invoice.number}.pdf`, contentType: 'application/pdf', contentBytes: pdf.toString('base64') }] }, saveToSentItems: true }) });
       if (!graphResponse.ok) { const graphError = await graphResponse.text(); return res.status(502).json({ error: `Microsoft Graph rejected the message: ${graphError}` }); }
       db.prepare("UPDATE invoices SET status = 'Sent', sent_at = CURRENT_TIMESTAMP WHERE id = ?").run(invoice.id);
@@ -846,7 +990,7 @@ app.post("/api/invoices/:id/send", async (req, res) => {
   }
   if (emailIntegration?.provider === 'mailjet' && savedMailConfig.authType === 'mailjet') {
     try {
-      const pdf = await createPdf(invoice);
+      const pdf = await createPdf(invoiceForDelivery);
       const authorization = Buffer.from(`${savedMailConfig.apiKey}:${savedMailConfig.secretKey}`).toString('base64');
       const mailjetResponse = await fetch('https://api.mailjet.com/v3.1/send', { method: 'POST', headers: { Authorization: `Basic ${authorization}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ Messages: [{ From: { Email: savedMailConfig.senderEmail, Name: savedMailConfig.fromName || savedMailConfig.senderName || businessName }, To: [{ Email: invoice.client_email, Name: invoice.client_name }], Subject: templateSubject, TextPart: templateMessage, Attachments: [{ ContentType: 'application/pdf', Filename: `${invoice.number}.pdf`, Base64Content: pdf.toString('base64') }] }] }) });
       if (!mailjetResponse.ok) { const mailjetError = await mailjetResponse.text(); return res.status(502).json({ error: `Mailjet rejected the message: ${mailjetError}` }); }
@@ -868,7 +1012,7 @@ app.post("/api/invoices/:id/send", async (req, res) => {
       secure: savedMailConfig.secure ?? process.env.SMTP_SECURE === "true",
       auth: { user: smtpUser, pass: smtpPass },
     });
-    const pdf = await createPdf(invoice);
+    const pdf = await createPdf(invoiceForDelivery);
     await transporter.sendMail({
       from: process.env.INVOICE_FROM || smtpUser,
       to: invoice.client_email,

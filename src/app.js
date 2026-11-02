@@ -7,13 +7,14 @@ import { go, render, toast } from './ui/render.js'
 import { toggleTheme, setTheme, toggleMobileMenu, closeMobileMenu, handleMobileMenuKeydown } from './ui/layout.js'
 import { tbl } from './pages/invoices.js'
 import { upd } from './pages/editor.js'
-import { newInv, editDraft, save, send, markPaid, downloadInvoice, downloadPreviewPdf, dup, del, savePast } from './actions/invoices.js'
+import { uploadBusinessLogo } from './actions/settings.js'
+import { newInv, editDraft, save, send, markPaid, downloadInvoice, downloadPreviewPdf, uploadInvoiceLogo, removeInvoiceLogo, dup, del, savePast } from './actions/invoices.js'
 import { wiz, manageIntegration, insertEmailToken, disc, savePreferredEmailProvider, wnext } from './actions/integrations.js'
 import { runRec, svNew, svNext, saveRec, saveChg, toggleRecurring, mrs } from './actions/recurring.js'
 import { addC, editClient, saveClientEdit } from './actions/clients.js'
 import { recPay } from './actions/payments.js'
 import { saveBiz, saveInvoiceNumbering, addInvoiceFormatToken, addInvoiceFormatTokenAtCursor, addCur, delCur, setDefaultCurrency, runManualBackup, saveSecuritySettings } from './actions/settings.js'
-import { loginAccount, signupAccount, resendVerification, resendUserVerification, setUserSuspended, inviteOrganizationMember, createOrganization, logoutAccount, changePassword, setSignupAllowed, toggleAuthPassword, requestPasswordReset, resetPassword, verifyEmail } from './actions/auth.js'
+import { loginAccount, signupAccount, resendVerification, resendUserVerification, setUserSuspended, inviteOrganizationMember, createOrganization, logoutAccount, changePassword, setSignupAllowed, toggleAuthPassword, requestPasswordReset, resetPassword, verifyEmail, openGuestInfo, closeGuestInfo, startGuestInvoice, leaveGuestInvoice, guestPreview, guestDownload, readGuestLogo, syncGuestEditor, updateGuestTotals, addGuestItem, removeGuestItem, promptGuestLogin, guestLivePreview } from './actions/auth.js'
 
 let started = false
 
@@ -64,14 +65,14 @@ export function startApp() {
 
 // Inline onclick/onchange handlers in the rendered markup resolve names on window.
 Object.assign(window, {
-  state, $, today, addDays, nextOn, tbl, upd, mrs,
-  go, render, toggleTheme, setTheme, toggleMobileMenu, closeMobileMenu, handleMobileMenuKeydown, newInv, editDraft, save, send, markPaid, downloadInvoice, downloadPreviewPdf, dup, del, savePast,
+  state, $, today, addDays, nextOn, tbl, upd, uploadBusinessLogo, mrs,
+  go, render, toggleTheme, setTheme, toggleMobileMenu, closeMobileMenu, handleMobileMenuKeydown, newInv, editDraft, save, send, markPaid, downloadInvoice, downloadPreviewPdf, uploadInvoiceLogo, removeInvoiceLogo, dup, del, savePast,
   wiz, manageIntegration, insertEmailToken, disc, savePreferredEmailProvider, wnext,
   runRec, svNew, svNext, saveRec, saveChg, toggleRecurring,
   addC, editClient, saveClientEdit,
   recPay,
   saveBiz, saveInvoiceNumbering, addInvoiceFormatToken, addInvoiceFormatTokenAtCursor, addCur, delCur, setDefaultCurrency, runManualBackup, saveSecuritySettings,
-  loginAccount, signupAccount, resendVerification, resendUserVerification, setUserSuspended, inviteOrganizationMember, createOrganization, logoutAccount, changePassword, setSignupAllowed, toggleAuthPassword, requestPasswordReset, resetPassword, verifyEmail,
+  loginAccount, signupAccount, resendVerification, resendUserVerification, setUserSuspended, inviteOrganizationMember, createOrganization, logoutAccount, changePassword, setSignupAllowed, toggleAuthPassword, requestPasswordReset, resetPassword, verifyEmail, openGuestInfo, closeGuestInfo, startGuestInvoice, leaveGuestInvoice, guestPreview, guestDownload, readGuestLogo, syncGuestEditor, updateGuestTotals, addGuestItem, removeGuestItem, promptGuestLogin, guestLivePreview,
 })
 
 bootKowope()
