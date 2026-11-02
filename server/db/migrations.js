@@ -140,6 +140,17 @@ const migrations = [
       db.prepare('INSERT OR IGNORE INTO security_settings (id) VALUES (1)').run()
     },
   },
+  {
+    // Repair migration for databases where an earlier migration was recorded
+    // before all business-profile columns were successfully created.
+    version: 12,
+    apply(db) {
+      const businessProfileColumns = db.prepare('PRAGMA table_info(business_profile)').all()
+      if (!businessProfileColumns.some((column) => column.name === 'preferred_email_provider')) {
+        db.exec('ALTER TABLE business_profile ADD COLUMN preferred_email_provider TEXT')
+      }
+    },
+  },
 ]
 
 export function runMigrations(db) {

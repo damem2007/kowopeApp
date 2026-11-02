@@ -3,6 +3,18 @@ import { currencySigns, currencyNames } from '../modules/catalog.js'
 import { $ } from '../modules/selectors.js'
 import { toast } from '../ui/render.js'
 
+const readApiResponse = async response => {
+  const contentType = response.headers.get('content-type') || ''
+  if (!contentType.includes('application/json')) {
+    throw new Error(response.status === 502 || response.status === 503
+      ? 'The invoice API is unavailable. Restart the development server and try again.'
+      : `The invoice API returned an unexpected response (${response.status}).`)
+  }
+  const result = await response.json()
+  if (!response.ok) throw new Error(result.error || 'Request failed')
+  return result
+}
+
 export const saveBiz = async () => {
   const existingBusiness = state.businessProfiles[0] || {}
   const business = {
@@ -25,8 +37,7 @@ export const saveBiz = async () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(business),
     })
-    const savedBusiness = await response.json()
-    if (!response.ok) throw new Error(savedBusiness.error || 'Unable to save business profile')
+    const savedBusiness = await readApiResponse(response)
 
     const localBusiness = {
       n: savedBusiness.name,
@@ -58,8 +69,7 @@ export const saveInvoiceNumbering = async () => {
   if (![...invoiceFormat.matchAll(/\{[A-Z]+\}/g)].every(match => supportedTokens.includes(match[0]))) return toast('Use only the supported invoice format tokens.')
   try {
     const response = await fetch('/api/business-profile', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: existingBusiness.n || '', address: existingBusiness.a || '', email: existingBusiness.e || '', phone: existingBusiness.p || '', paymentInstructions: existingBusiness.paymentInstructions || '', invoicePrefix, invoiceNumberPadding: invoicePadding, invoiceNumberFormat: invoiceFormat, preferredEmailProvider: existingBusiness.preferredEmailProvider || null, defaultCurrency: state.defaultCurrency }) })
-    const savedBusiness = await response.json()
-    if (!response.ok) throw new Error(savedBusiness.error || 'Unable to save invoice numbering')
+    const savedBusiness = await readApiResponse(response)
     state.businessProfiles[0] = { ...existingBusiness, invoicePrefix: savedBusiness.invoice_prefix || invoicePrefix, invoicePadding: savedBusiness.invoice_number_padding || invoicePadding, invoiceFormat: savedBusiness.invoice_number_format || invoiceFormat }
     toast('Invoice numbering saved')
   } catch (error) { toast(error.message) }

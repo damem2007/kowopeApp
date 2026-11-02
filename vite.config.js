@@ -6,7 +6,9 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     proxy: {
-      '/api': 'http://localhost:3001',
+      // Use IPv4 explicitly so the Vite proxy reaches the Express process
+      // consistently on machines where localhost resolves to IPv6 first.
+      '/api': 'http://127.0.0.1:3001',
     },
   },
 })
