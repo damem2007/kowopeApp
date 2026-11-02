@@ -136,6 +136,19 @@ const ownerSetupRequired = () => {
 }
 const signupIsAllowed = () => ownerSetupRequired() || Boolean(db.prepare('SELECT allow_user_signup FROM business_profile WHERE id = 1').get()?.allow_user_signup);
 app.get('/api/auth/status', (_req, res) => { const user = sessionUser(_req); res.json({ authenticated: Boolean(user), allowSignup: signupIsAllowed(), ownerSetupRequired: ownerSetupRequired(), role: user?.role || null }); });
+function getPublicAppUrl(request) {
+  const configuredUrl = String(process.env.PUBLIC_APP_URL || '').trim().replace(/\/$/, '')
+  if (configuredUrl && (process.env.NODE_ENV !== 'production' || !configuredUrl.includes('localhost'))) return configuredUrl
+  const renderUrl = String(process.env.RENDER_EXTERNAL_URL || '').trim().replace(/\/$/, '')
+  if (renderUrl) return renderUrl
+  if (process.env.NODE_ENV === 'production') {
+    const forwardedProtocol = String(request?.get('x-forwarded-proto') || 'https').split(',')[0].trim()
+    const forwardedHost = String(request?.get('x-forwarded-host') || request?.get('host') || '').split(',')[0].trim()
+    if (forwardedHost) return `${forwardedProtocol}://${forwardedHost}`
+    throw new Error('Set PUBLIC_APP_URL or RENDER_EXTERNAL_URL for production email links.')
+  }
+  return 'http://localhost:5173'
+}
 async function sendVerificationEmail(email, verificationUrl) {
   const subject = 'Verify your Kowope account'
   const message = `Verify your Kowope account by opening this link:\n\n${verificationUrl}\n\nThis link expires in 24 hours.`
@@ -155,11 +168,10 @@ async function sendVerificationEmail(email, verificationUrl) {
   const transporter = nodemailer.createTransport({ host: process.env.SMTP_HOST, port: Number(process.env.SMTP_PORT || 587), secure: process.env.SMTP_SECURE === 'true', auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } })
   await transporter.sendMail({ from: process.env.INVOICE_FROM || process.env.SMTP_USER, to: email, subject, text: message })
 }
-async function createAndSendVerification(user) {
+async function createAndSendVerification(user, request) {
   const rawToken = crypto.randomBytes(32).toString('hex')
   db.prepare('INSERT INTO email_verification_tokens (token_hash, user_id, expires_at) VALUES (?, ?, ?)').run(hashToken(rawToken), user.id, new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString())
-  const frontendUrl = process.env.PUBLIC_APP_URL || 'http://localhost:5173'
-  await sendVerificationEmail(user.email, `${frontendUrl.replace(/\/$/, '')}/?verify=${rawToken}`)
+  await sendVerificationEmail(user.email, `${getPublicAppUrl(request)}/?verify=${rawToken}`)
 }
 app.post('/api/auth/signup', async (req, res) => {
   const isOwnerSetup = ownerSetupRequired()
@@ -190,7 +202,7 @@ app.post('/api/auth/signup', async (req, res) => {
     accountPersisted = true
 
     const createdUser = { id: createdUserId, email }
-    if (!firstOwner) await createAndSendVerification(createdUser)
+    if (!firstOwner) await createAndSendVerification(createdUser, req)
     res.status(201).json(firstOwner
       ? { verificationRequired: false, ownerCreated: true, message: 'Platform owner account created. You can sign in without email verification.' }
       : { verificationRequired: true, message: 'Account created. Check your email to verify your account before signing in.' })
@@ -228,7 +240,7 @@ app.post('/api/auth/resend-verification', async (req, res) => {
   if (!user || user.email_verified_at) return res.json({ ok: true, message: 'If the account needs verification, a new link has been sent.' })
   try {
     db.prepare('UPDATE email_verification_tokens SET used_at = CURRENT_TIMESTAMP WHERE user_id = ? AND used_at IS NULL').run(user.id)
-    await createAndSendVerification(user)
+    await createAndSendVerification(user, req)
     res.json({ ok: true, message: 'A new verification link has been sent. It expires in 24 hours.' })
   } catch (error) {
     console.error('Verification email failed:', error)
@@ -321,8 +333,7 @@ app.post('/api/auth/forgot-password', async (req, res) => {
     const token = crypto.randomBytes(32).toString('hex');
     const securitySettings = getSecuritySettings();
     passwordResetTokens.set(token, { userId: user.id, expiresAt: Date.now() + securitySettings.reset_token_minutes * 60 * 1000 });
-    const frontendUrl = process.env.PUBLIC_APP_URL || 'http://localhost:5173';
-    const resetUrl = `${frontendUrl.replace(/\/$/, '')}/?reset=${token}`;
+    const resetUrl = `${getPublicAppUrl(req)}/?reset=${token}`;
     const integration = db.prepare("SELECT * FROM integrations WHERE provider IN ('mailjet', 'outlook', 'gmail') AND status = 'connected' ORDER BY connected_at DESC LIMIT 1").get();
     const config = integration ? JSON.parse(decryptValue(integration.config_json || '{}')) : {};
     const business = getBusinessProfile(db.prepare('SELECT organization_id FROM organization_members WHERE user_id = ?').get(user.id)?.organization_id) || {};
