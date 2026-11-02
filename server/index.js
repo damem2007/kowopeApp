@@ -237,6 +237,29 @@ app.patch('/api/recurring/:id', (req, res) => {
 });
 app.post('/api/recurring/run', (_req, res) => res.json({ created: runDueSchedules(db) }));
 app.post('/api/recurring/:id/price', (req, res) => { const { amount, effectiveFrom, priceChangeNote = false } = req.body; if (!(Number(amount) > 0) || !effectiveFrom) return res.status(400).json({ error: 'Enter a valid amount and effective date.' }); const result = db.prepare('INSERT INTO schedule_price_history (schedule_id, amount, effective_from, price_change_note) VALUES (?, ?, ?, ?)').run(req.params.id, Number(amount), effectiveFrom, priceChangeNote ? 1 : 0); res.status(201).json(db.prepare('SELECT * FROM schedule_price_history WHERE id = ?').get(result.lastInsertRowid)); });
+
+// Render Cron authenticates as a service with the shared CRON_SECRET rather
+// than using an interactive Kowope session.
+app.post('/internal/cron/run', async (req, res) => {
+  const authorizationHeader = req.get('authorization')
+  const expectedAuthorization = process.env.CRON_SECRET
+    ? `Bearer ${process.env.CRON_SECRET}`
+    : null
+
+  if (!expectedAuthorization || authorizationHeader !== expectedAuthorization) {
+    return res.status(401).json({ error: 'Unauthorized' })
+  }
+
+  try {
+    const recurringResult = runDueSchedules(db)
+    const backupResult = await runScheduledBackup(db, databasePath)
+    return res.json({ ok: true, recurring: recurringResult, backup: backupResult })
+  } catch (error) {
+    console.error('Cron execution failed:', error)
+    return res.status(500).json({ error: 'Cron execution failed' })
+  }
+})
+
 app.get("/api/business-profile", (_req, res) => res.json(getBusinessProfile()));
 app.get('/api/currencies', (_req, res) => res.json(db.prepare('SELECT code, name, sign FROM currencies ORDER BY code').all()));
 app.post('/api/currencies', (req, res) => {

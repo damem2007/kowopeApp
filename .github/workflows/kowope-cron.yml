@@ -1,0 +1,20 @@
+name: Kowope scheduled tasks
+
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+jobs:
+  run-scheduled-tasks:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Run Kowope cron
+        env:
+          CRON_SECRET: ${{ secrets.KOWOPE_CRON_SECRET }}
+        run: |
+          curl --fail-with-body --silent --show-error \
+            --request POST \
+            --header "Authorization: Bearer ${CRON_SECRET}" \
+            https://kowopeapp.onrender.com/internal/cron/run
