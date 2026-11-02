@@ -32,5 +32,6 @@ export const state = {
   platformUsers: [],
   organization: null,
   securitySettings: null,
+  mobileMenuOpen: false,
 };
 

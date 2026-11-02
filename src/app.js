@@ -4,6 +4,7 @@ import { $ } from './modules/selectors.js'
 import { nextOn } from './modules/recurrence.js'
 import { bootKowope } from './modules/bootstrap.js'
 import { go, render, toast } from './ui/render.js'
+import { toggleTheme, setTheme, toggleMobileMenu, closeMobileMenu, handleMobileMenuKeydown } from './ui/layout.js'
 import { tbl } from './pages/invoices.js'
 import { upd } from './pages/editor.js'
 import { newInv, editDraft, save, send, markPaid, downloadInvoice, downloadPreviewPdf, dup, del, savePast } from './actions/invoices.js'
@@ -64,7 +65,7 @@ export function startApp() {
 // Inline onclick/onchange handlers in the rendered markup resolve names on window.
 Object.assign(window, {
   state, $, today, addDays, nextOn, tbl, upd, mrs,
-  go, render, newInv, editDraft, save, send, markPaid, downloadInvoice, downloadPreviewPdf, dup, del, savePast,
+  go, render, toggleTheme, setTheme, toggleMobileMenu, closeMobileMenu, handleMobileMenuKeydown, newInv, editDraft, save, send, markPaid, downloadInvoice, downloadPreviewPdf, dup, del, savePast,
   wiz, manageIntegration, insertEmailToken, disc, savePreferredEmailProvider, wnext,
   runRec, svNew, svNext, saveRec, saveChg, toggleRecurring,
   addC, editClient, saveClientEdit,

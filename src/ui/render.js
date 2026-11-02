@@ -16,7 +16,7 @@ import { login } from '../pages/login.js'
 import { platformUsers } from '../pages/platformUsers.js'
 import { organization } from '../pages/organization.js'
 
-export const go = (route, invoiceTab) => { state.currentRoute = route; if (invoiceTab) state.activeInvoiceTab = invoiceTab; state.searchQuery = ""; state.openMenuIndex = 0; state.invoiceEditor = null; render(); scrollTo(0, 0) }
+export const go = (route, invoiceTab) => { state.currentRoute = route; if (invoiceTab) state.activeInvoiceTab = invoiceTab; state.searchQuery = ""; state.openMenuIndex = 0; state.invoiceEditor = null; state.mobileMenuOpen = false; render(); scrollTo(0, 0) }
 export const toast = (message, undo, options = {}) => {
   // Do not let a follow-up catch block replace a persistent API error with a
   // short-lived success-style notification.
