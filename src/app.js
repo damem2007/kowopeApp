@@ -14,7 +14,13 @@ import { runRec, svNew, svNext, saveRec, saveChg, toggleRecurring, mrs } from '.
 import { addC, editClient, saveClientEdit } from './actions/clients.js'
 import { recPay } from './actions/payments.js'
 import { saveBiz, saveInvoiceNumbering, addInvoiceFormatToken, addInvoiceFormatTokenAtCursor, addCur, delCur, setDefaultCurrency, runManualBackup, saveSecuritySettings } from './actions/settings.js'
-import { loginAccount, signupAccount, resendVerification, resendUserVerification, setUserSuspended, inviteOrganizationMember, createOrganization, logoutAccount, changePassword, setSignupAllowed, toggleAuthPassword, requestPasswordReset, resetPassword, verifyEmail, openGuestInfo, closeGuestInfo, startGuestInvoice, leaveGuestInvoice, guestPreview, guestDownload, readGuestLogo, syncGuestEditor, updateGuestTotals, addGuestItem, removeGuestItem, promptGuestLogin, guestLivePreview } from './actions/auth.js'
+import { loginAccount, signupAccount, resendVerification, resendUserVerification, setUserSuspended, 
+  inviteOrganizationMember, createOrganization, logoutAccount, changePassword, 
+  setSignupAllowed, toggleAuthPassword, requestPasswordReset, resetPassword, verifyEmail, 
+  openGuestInfo, closeGuestInfo, startGuestInvoice, leaveGuestInvoice, guestPreview, guestDownload, 
+  readGuestLogo, syncGuestEditor, updateGuestTotals, addGuestItem, removeGuestItem, promptGuestLogin, 
+  guestLivePreview, toggleGuestBusinessEdit, toggleGuestClientEdit, removeGuestLogo, toggleGuestCurrencyEditor, 
+  addGuestCurrency } from './actions/auth.js'
 
 let started = false
 
@@ -72,7 +78,7 @@ Object.assign(window, {
   addC, editClient, saveClientEdit,
   recPay,
   saveBiz, saveInvoiceNumbering, addInvoiceFormatToken, addInvoiceFormatTokenAtCursor, addCur, delCur, setDefaultCurrency, runManualBackup, saveSecuritySettings,
-  loginAccount, signupAccount, resendVerification, resendUserVerification, setUserSuspended, inviteOrganizationMember, createOrganization, logoutAccount, changePassword, setSignupAllowed, toggleAuthPassword, requestPasswordReset, resetPassword, verifyEmail, openGuestInfo, closeGuestInfo, startGuestInvoice, leaveGuestInvoice, guestPreview, guestDownload, readGuestLogo, syncGuestEditor, updateGuestTotals, addGuestItem, removeGuestItem, promptGuestLogin, guestLivePreview,
+  loginAccount, signupAccount, resendVerification, resendUserVerification, setUserSuspended, inviteOrganizationMember, createOrganization, logoutAccount, changePassword, setSignupAllowed, toggleAuthPassword, requestPasswordReset, resetPassword, verifyEmail, openGuestInfo, closeGuestInfo, startGuestInvoice, leaveGuestInvoice, guestPreview, guestDownload, readGuestLogo, syncGuestEditor, updateGuestTotals, addGuestItem, removeGuestItem, promptGuestLogin, guestLivePreview, toggleGuestBusinessEdit, toggleGuestClientEdit, removeGuestLogo, toggleGuestCurrencyEditor, addGuestCurrency,
 })
 
 bootKowope()

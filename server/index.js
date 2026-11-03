@@ -180,7 +180,7 @@ const ownerSetupRequired = () => {
   return !ownerExists
 }
 const signupIsAllowed = () => ownerSetupRequired() || Boolean(db.prepare('SELECT allow_user_signup FROM business_profile WHERE id = 1').get()?.allow_user_signup);
-app.get('/api/auth/status', (_req, res) => { const user = sessionUser(_req); res.json({ authenticated: Boolean(user), allowSignup: signupIsAllowed(), ownerSetupRequired: ownerSetupRequired(), role: user?.role || null }); });
+app.get('/api/auth/status', (_req, res) => { const user = sessionUser(_req); res.json({ authenticated: Boolean(user), allowSignup: signupIsAllowed(), ownerSetupRequired: ownerSetupRequired(), role: user?.role || null, email: user?.email || null }); });
 function getPublicAppUrl(request) {
   const configuredUrl = String(process.env.PUBLIC_APP_URL || '').trim().replace(/\/$/, '')
   if (configuredUrl && (process.env.NODE_ENV !== 'production' || !configuredUrl.includes('localhost'))) return configuredUrl

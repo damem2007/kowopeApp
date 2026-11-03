@@ -8,6 +8,7 @@ export async function bootKowope() {
   state.allowSignup = authStatus.allowSignup
   state.ownerSetupRequired = Boolean(authStatus.ownerSetupRequired)
   state.authUserRole = authStatus.role || null
+  state.authEmail = authStatus.email || ''
   if (!authStatus.authenticated) { state.authenticated = false; state.currentRoute = 'login'; render(); return }
   state.authenticated = true
   state.currentRoute = 'overview'

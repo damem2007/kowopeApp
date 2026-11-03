@@ -103,6 +103,87 @@ details{position:relative}details[open]{z-index:20}summary{list-style:none;curso
     width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round
   }
 }
+
+.guest-editor-page{max-width:1180px;width:100%;margin:0 auto;padding:24px 24px 104px;box-sizing:border-box;overflow-x:hidden}
+.guest-invoice-editor .guest-meta-grid section{min-width:0}
+.guest-contact-display{min-height:90px}
+.guest-contact-display .mut{margin-top:8px;line-height:1.45;white-space:pre-line}
+.guest-edit-fields{display:grid;gap:10px}
+.guest-edit-fields textarea{min-height:84px}
+.guest-edit-actions{justify-content:flex-start}
+.guest-currency-editor{display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:end;margin:8px 0 12px}
+.guest-currency-add{margin:8px 0 12px}
+.guest-invoice-editor button.guest-currency-add{display:block;margin:12px 0 24px}
+.guest-invoice-editor .split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;width:100%}
+.guest-invoice-editor .split>*{min-width:0}
+.guest-locked{opacity:.62;cursor:not-allowed}
+.guest-invoice-editor .invoice-logo-has-image{min-height:60px;display:flex;align-items:center;justify-content:flex-end}
+.guest-invoice-editor .invoice-logo-has-image .invoice-logo-preview{max-width:232px;max-height:60px}
+.guest-invoice-editor button:not(.btn):not(.invoice-logo-remove):not(.text-btn):not(.chip):not(.icon-btn){
+  appearance:none;
+  -webkit-appearance:none;
+  border:0;
+  background:transparent;
+  color:inherit;
+  font:inherit;
+}
+.guest-invoice-editor .text-btn{
+  appearance:none;
+  -webkit-appearance:none;
+  display:inline-flex;
+  align-items:center;
+  min-height:44px;
+  padding:0;
+  border:0 !important;
+  background:transparent !important;
+  box-shadow:none !important;
+  color:var(--pri) !important;
+  cursor:pointer;
+}
+.guest-invoice-editor .chip{
+  appearance:none;
+  -webkit-appearance:none;
+  display:inline-flex;
+  align-items:center;
+  min-height:44px;
+  padding:8px 14px;
+  border:1px solid var(--line) !important;
+  border-radius:999px;
+  background:var(--card) !important;
+  box-shadow:none !important;
+  color:var(--ink) !important;
+  cursor:pointer;
+}
+
+.guest-invoice-editor .invoice-due-chips{margin-top:12px}
+.guest-invoice-editor .chip.active{
+  border-color:var(--pri) !important;
+  color:var(--pri) !important;
+}
+.guest-invoice-editor .chip:hover,
+.guest-invoice-editor .text-btn:hover{color:var(--pri) !important}
+.guest-invoice-editor .icon-btn{
+  width:44px;
+  height:44px;
+  display:grid;
+  place-items:center;
+  border:1px solid var(--line) !important;
+  border-radius:10px;
+  background:var(--card) !important;
+  color:var(--mut) !important;
+  cursor:pointer;
+}
+.guest-invoice-editor .icon-btn:hover{
+  border-color:var(--danger) !important;
+  background:var(--card) !important;
+  color:var(--danger) !important;
+}
+@media(max-width:600px){
+  .guest-editor-page{padding:14px 14px 104px}
+  .guest-currency-editor{grid-template-columns:1fr 1fr}
+  .guest-currency-editor .btn{grid-column:1/-1}
+  .guest-meta-grid{gap:18px}
+}
 .settings-page .settings-checks{gap:20px 32px}.settings-page .settings-checks .tg{gap:12px;align-items:center;line-height:1.5}.settings-page .settings-checks .tg input[type=checkbox]{appearance:none;-webkit-appearance:none;box-sizing:border-box;width:18px!important;min-width:18px;max-width:18px;height:18px!important;min-height:18px;max-height:18px;flex:0 0 18px;margin:0;padding:0;border:2px solid #7f7f7f;border-radius:3px;background:#fff;display:grid;place-items:center}.settings-page .settings-checks .tg input[type=checkbox]:checked{background:var(--pri);border-color:var(--pri)}.settings-page .settings-checks .tg input[type=checkbox]:checked::after{content:'✓';color:#fff;font-size:13px;font-weight:700;line-height:1}
 .settings-page .settings-checks{grid-template-columns:1fr}
 .settings-page .settings-business-grid{grid-template-columns:repeat(12,minmax(0,1fr))}
@@ -196,3 +277,6 @@ details{position:relative}details[open]{z-index:20}summary{list-style:none;curso
   .invoice-money{font-size:13px}
   .invoice-repeat-card{padding:18px}
 }
+.overview-greeting{display:inline-flex;align-items:center;gap:8px}
+.overview-greeting-icon{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;color:var(--pri);flex:0 0 20px}
+.overview-greeting-icon svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}

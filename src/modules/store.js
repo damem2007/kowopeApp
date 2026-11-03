@@ -35,6 +35,10 @@ export const state = {
   securitySettings: null,
   mobileMenuOpen: false,
   guestInvoice: { businessName: '', businessAddress: '', businessEmail: '', businessPhone: '', clientName: '', clientAddress: '', clientEmail: '', clientPhone: '', items: [{ d: '', q: 1, p: 0 }], tax: 0, tn: 'Tax', dv: 0, dt: '%', notes: '', amount: 0, dueDate: '', currency: 'USD', logoDataUrl: '' },
-  guestInfoOpen: false,
+guestInfoOpen: false,
+guestBusinessEditing: false,
+guestClientEditing: false,
+guestCurrencyEditorOpen: false,
+guestCurrencies: [],
 };
 
