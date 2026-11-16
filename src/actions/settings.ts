@@ -3,6 +3,20 @@ import { currencySigns, currencyNames } from '../modules/catalog.tsx'
 import { querySelector } from '../modules/selectors.ts'
 import { render, toast } from '../ui/render.tsx'
 
+function replace(text) {
+  const replacements = [
+    [/\u200B/g, ''], // Remove zero-width space
+    [/\\n/g, '\n'], // Replace newlines with spaces
+    [/ +/g, ' '], // Replace multiple spaces with a single space
+    [/\\[object Object\\]/g, "\n"] // Replace [object Object] with a newline
+  ]
+  for (const [pattern, replacement] of replacements) {
+    text = text.replace(pattern, replacement)
+  }
+  console.log('Replaced text:', text);
+  return text.trim()
+}
+
 const readApiResponse = async response => {
   const contentType = response.headers.get('content-type') || ''
   if (!contentType.includes('application/json')) {
@@ -32,16 +46,21 @@ export const saveBiz = async () => {
     defaultCurrency: state.defaultCurrency,
     ...(state.businessLogoDraft === undefined ? {} : { logoDataUrl: state.businessLogoDraft }),
   }
+  console.log('[1] Save function triggered');
   if (!business.name) return
-
   try {
+  console.log('[2] Sending business profile:', business);
     const response = await fetch('/api/business-profile', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(business),
     })
+      //console.log('[3] API response status:', response.status);
     const savedBusiness = await readApiResponse(response)
-
+    //console.log('[4] Saved business profile:', savedBusiness);
+    //console.log('[5] Original address:', savedBusiness.address);
+    //console.log('[6] Address type:', typeof savedBusiness.address);
+    //console.log('[7] Formatted address:', replace(savedBusiness.address));
     // The UI uses compact, established business-profile field names. Keep the
     // API response normalized here so a successful save is immediately visible
     // without requiring a full bootstrap refresh.

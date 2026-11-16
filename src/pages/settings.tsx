@@ -48,13 +48,15 @@ export function settings() {
   const businessCards = state.businessProfiles.map((businessProfile, businessIndex) => {
     const nameParts = (businessProfile.n || 'Business').trim().split(/\s+/);
     const initials = nameParts.length > 1 ? `${nameParts[0][0]}${nameParts[nameParts.length - 1][0]}` : nameParts[0].slice(0, 2);
-    const addressLines = (businessProfile.a || '').replace(/\n/g, <br />);
+    const addressLines = (businessProfile.a || '').split('\n').map((line, lineIndex) => <span key={lineIndex}>{line}<br /></span>); 
     return <section key={businessProfile.id || businessIndex} className="card settings-card c4"><div className="settings-head"><div className="row"><div className="settings-avatar">{initials.toUpperCase()}</div><div><h3>{businessProfile.n}</h3>{businessIndex === 0 ? renderPill('Default', 'Active') : ''}</div></div><button className="btn s sm" onClick={event => {
           state.businessLogoDraft = undefined;
           state.activeModal = 'biz';
           state.be = businessIndex;
           render();
-        }}>Edit</button></div><div className="settings-address">{addressLines}<br />{businessProfile.e || ''}<br />{businessProfile.p || ''}</div><p className="settings-sub" style={{
+        }}>Edit</button></div>
+        <div className="settings-address">{addressLines}{businessProfile.e || ''}<br />{businessProfile.p || ''}</div>
+        <p className="settings-sub" style={{
         "marginTop": "auto"
       }}>Pick any saved business when you create an invoice.</p></section>;
   });
