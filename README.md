@@ -1,133 +1,106 @@
-# Kowope Invoice Hub
+# Kowope — React application with SQLite / hosted PostgreSQL adapters
 
-A Vite + React invoicing dashboard backed by a lightweight Node.js and Express API.
+This is a consolidated source tree based on the supplied `kowope.zip` and
+selected prior database changes. It uses **React components** for the frontend
+instead of directly assigning HTML strings to `innerHTML`. The existing Express
+HTTP endpoints, business features, styles, and encryption routines are retained.
 
-Invoices are persisted in a local SQLite database at `data/invoices.db`. The app can generate PDF invoices and email them as attachments through Gmail or Outlook SMTP.
+## Local setup
 
-## Features
-
-- Invoice dashboard with outstanding, paid, overdue, and collection metrics
-- Invoice list with client, amount, status, and due-date details
-- Create invoice modal and draft workflow
-- Send invoice workflow through connected providers
-- Provider registry for Gmail, Outlook, Stripe, and QuickBooks
-- Responsive layout for desktop and mobile screens
-
-## Requirements
-
-- Node.js 18 or newer
-- npm
-
-## Getting started
-
-Install dependencies:
+Use Node.js 20.19+ and a development environment with npm access.
 
 ```bash
 npm install
-```
-
-Configure email delivery:
-
-```bash
 cp .env.example .env
 ```
 
-Then edit `.env`. For Gmail, use an App Password rather than your normal account password. For Outlook, use `smtp.office365.com` and your Microsoft 365 SMTP credentials.
+For existing SQLite users, set:
 
-Start the frontend and API together:
+```env
+DATABASE_CLIENT=sqlite
+SQLITE_DATABASE_PATH=./data/invoices.db
+VAULT_KEY=<the current key used to encrypt existing records>
+```
+
+For a newly provisioned **hosted** PostgreSQL database, set:
+
+```env
+DATABASE_CLIENT=postgres
+DATABASE_URL=postgresql://USERNAME:PASSWORD@HOST:5432/DB?sslmode=require
+VAULT_KEY=<the existing key if transferring data>
+```
+
+Initialize a **new, empty** remote PostgreSQL database **once**:
 
 ```bash
+node scripts/init-remote-postgres.js
+```
+
+For an existing PostgreSQL database with baseline version 1 already applied,
+back it up and apply only the numbered migration:
+
+```bash
+node scripts/apply-remote-numbering-pg.js
+```
+
+Start the API and frontend in separate terminals:
+
+```bash
+npm run dev:api
 npm run dev
 ```
 
-The Vite frontend runs on its default development port. The Express API runs on:
+Frontend: `http://localhost:5173`; Express API: `http://localhost:3001`.
+The API requests use the Vite dev proxy. Run `npm run recurring` for the
+scheduled-invoice worker; production cron can invoke `/internal/cron/run` with
+`Authorization: Bearer $CRON_SECRET`.
 
-```text
-http://localhost:3001
-```
+## Architectural and source consolidation
 
-Create a production build:
+- `src/main.jsx` initializes React; `src/ui/render.js` uses `createRoot`.
+- `src/pages`, `src/modals`, and `src/ui/layout.js` return React elements rather
+  than injecting HTML strings. Dedicated JSX components in `src/components`
+  implement the invoice editor, preview, and business-numbering settings.
+- `src/actions` still handles existing fetch requests and legacy app state so
+  feature behavior stays recognizable; a state-management rewrite was not part
+  of this compatibility change.
+- `server/services/invoice-numbering.js` is the **only backend formatter and
+  allocator**. Manual invoice creation and `server/services/recurrence.js` call
+  it using the selected business profile.
+- `server/db/index.js` is the **only database initializer** for API and worker;
+  `sqlite-async-adapter.js` and `postgres-adapter.js` implement the same contract.
+- `server/db/migrations.js` remains the historical SQLite migration ledger;
+  PostgreSQL has its own schema and migration SQL.
+- `server/security/crypto.js` is unchanged. Always retain `VAULT_KEY` when
+  transferring existing encrypted data.
 
-```bash
-npm run build
-```
+## Preservation and migration cautions
 
-Start the API in production mode after building:
+**This is a source integration, not a verified production deployment.** No live
+PostgreSQL server, existing SQLite file, external email provider, or browser E2E
+suite was available for this run. Check the manual invoice, recurring invoice,
+client, payments, authentication, integration and backup workflows in staging
+before deploying. Do not overwrite the running application until smoke-tested.
 
-```bash
-NODE_ENV=production npm start
-```
+SQLite file backups remain implemented for SQLite through the unchanged backup
+service. Hosted PostgreSQL cannot be backed up with a SQLite ZIP snapshot;
+configure a provider backup and verified restores. The PostgreSQL API backup
+endpoint explicitly reports unsupported rather than claiming success.
 
-## Project structure
+Migration SQL only backfills `business_profile_id` for historical records when
+ownership is unambiguous. Records from multi-business organizations require a
+manual ownership review. Existing invoice identifiers are never rewritten.
+The old globally unique `invoices.number` constraint remains for compatibility,
+so different businesses choosing identical number formats can cause numbering
+gaps. This does not change the displayed business format.
 
-```text
-.
-├── server/
-│   └── index.js       Express API and provider routes
-├── src/
-│   ├── main.jsx       React application
-│   └── styles.css     Application styles
-├── index.html         Vite entry point
-└── vite.config.js     Vite configuration
-```
+## Checks run
 
-## API endpoints
+- `node --test tests/*.test.js` — business-specific formats, transaction
+  rollback, encrypted invoice snapshots and cross-business collision handling.
+- TypeScript parser-based syntax checks across the React source files.
+- Static import/export audit of relative imports.
+- Mock React component-render smoke tests across fourteen UI route states.
 
-### List providers
-
-```http
-GET /api/providers
-```
-
-Returns the configured provider registry and connection states.
-
-### Send an invoice
-
-```http
-POST /api/invoices/:id/send
-Content-Type: application/json
-```
-
-Example request:
-
-```json
-{
-  "provider": "gmail",
-  "recipient": "client@example.com"
-}
-```
-
-Only providers marked as connected can currently send invoices. The provider records in `server/index.js` are intentionally structured as integration points for adding OAuth and real provider SDK calls.
-
-## Sending a real invoice
-
-1. Start the app with `npm run dev`.
-2. Click **New invoice**.
-3. Enter the employer/client email, description, amount, and due date.
-4. Create the invoice.
-5. Select the send icon beside the invoice.
-6. Confirm sending. The app generates a PDF, emails it as an attachment, and marks the invoice as sent.
-
-The database and generated invoice records remain available after restarting the app.
-
-## Connecting real providers
-
-The current Gmail connection is a demo connection. To make providers production-ready:
-
-1. Add OAuth credentials through environment variables.
-2. Add provider authorization and callback routes in `server/index.js`.
-3. Store encrypted access and refresh tokens in a database.
-4. Replace the send endpoint's confirmation response with the provider SDK/API call.
-5. Add webhook handling for delivery, payment, and synchronization events.
-
-Do not commit OAuth secrets, API keys, or access tokens to the repository.
-
-## Available scripts
-
-| Script | Description |
-|---|---|
-| `npm run dev` | Starts Vite and the Express API together |
-| `npm run build` | Builds the frontend for production |
-| `npm start` | Starts the Express server |
-
-# invoicingApp
+These are targeted checks, **not** substitutes for `npm run build`, tests using
+real React in a browser, or tests against a live PostgreSQL instance.

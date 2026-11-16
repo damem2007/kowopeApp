@@ -599,6 +599,64 @@ const migrations = [
       db.exec('PRAGMA foreign_keys = ON')
     },
   },
+  {
+    version: 34,
+    description: 'Associate invoices and recurring schedules with their own business profile and allocate business sequences',
+    apply(db) {
+      const ensureColumn = (table, column) => {
+        const existingColumns = db.prepare(`PRAGMA table_info(${table})`).all()
+        if (!existingColumns.some(item => item.name === column)) {
+          db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} INTEGER REFERENCES business_profile(id)`)
+        }
+      }
+      ensureColumn('invoices', 'business_profile_id')
+      ensureColumn('recurring_schedules', 'business_profile_id')
+      db.exec(`CREATE TABLE IF NOT EXISTS invoice_sequences (
+        business_profile_id INTEGER PRIMARY KEY REFERENCES business_profile(id) ON DELETE CASCADE,
+        next_value INTEGER NOT NULL DEFAULT 1 CHECK (next_value >= 1)
+      )`)
+
+      // Associate historical records ONLY if precisely one business is eligible.
+      // Never guess when an organization owns multiple profiles.
+      const profiles = db.prepare('SELECT id, organization_id, user_id FROM business_profile').all()
+      const findUnambiguousProfile = row => {
+        const matches = profiles.filter(profile =>
+          (row.organization_id != null && profile.organization_id === row.organization_id) ||
+          (profile.organization_id == null && row.user_id != null && profile.user_id === row.user_id)
+        )
+        return matches.length === 1 ? matches[0].id : null
+      }
+      const linkRecord = table => {
+        const rows = db.prepare(`SELECT id, organization_id, user_id FROM ${table} WHERE business_profile_id IS NULL`).all()
+        const update = db.prepare(`UPDATE ${table} SET business_profile_id = ? WHERE id = ? AND business_profile_id IS NULL`)
+        for (const row of rows) {
+          const profileId = findUnambiguousProfile(row)
+          if (profileId != null) update.run(profileId, row.id)
+        }
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_${table}_business_profile_id ON ${table}(business_profile_id)`)
+      }
+      linkRecord('invoices')
+      linkRecord('recurring_schedules')
+
+      const seed = db.prepare(`INSERT OR IGNORE INTO invoice_sequences (business_profile_id, next_value)
+        VALUES (?, ?)`)
+      for (const profile of profiles) {
+        const count = db.prepare('SELECT COUNT(*) AS count FROM invoices WHERE business_profile_id = ?').get(profile.id).count
+        seed.run(profile.id, count + 1)
+      }
+    },
+  },
+  {
+    version: 35,
+    description: 'Add an optional end date for finite recurring invoice schedules',
+    apply(db) {
+      const columns = db.prepare('PRAGMA table_info(recurring_schedules)').all()
+      if (!columns.some(column => column.name === 'end_at')) {
+        db.exec('ALTER TABLE recurring_schedules ADD COLUMN end_at TEXT')
+      }
+    },
+  },
+
 ]
 
 export function runMigrations(db) {

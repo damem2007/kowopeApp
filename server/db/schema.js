@@ -62,6 +62,7 @@ CREATE TABLE IF NOT EXISTS recurring_schedules (
   currency_code TEXT NOT NULL DEFAULT 'USD',
   status TEXT NOT NULL DEFAULT 'active',
   next_run_at TEXT NOT NULL,
+  end_at TEXT,
   auto_send INTEGER NOT NULL DEFAULT 0,
   source_invoice_id TEXT REFERENCES invoices(id),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP

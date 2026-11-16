@@ -1,11 +1,10 @@
 /**
  * Database adapter boundary.
  *
- * The application currently uses the synchronous SQLite adapter because its
- * routes and services use better-sqlite3's synchronous API. PostgreSQL is
- * intentionally represented as a separate adapter contract rather than being
- * made to look synchronous: node-postgres is asynchronous and must be wired
- * through async repositories before it can be enabled safely.
+ * Both supported engines now expose asynchronous query methods.
+ * SQLite uses a serialized better-sqlite3 wrapper and PostgreSQL uses pg.
+ * Legacy services that expect synchronous database access must be migrated
+ * separately before the entire API can use the switch.
  */
 export const databaseClients = Object.freeze({
   SQLITE: 'sqlite',
@@ -47,6 +46,9 @@ export const databaseAdapterContract = Object.freeze([
   'many',
   'execute',
   'transaction',
+  'lockInvoiceNumbering',
+  'lockRecurring',
+  'getDueRecurringSchedules',
   'close',
 ])
 
@@ -59,8 +61,3 @@ export function assertDatabaseAdapter(adapter) {
   return adapter
 }
 
-export function createPostgresAdapterNotYetEnabled() {
-  throw new Error(
-    'PostgreSQL is configured but not enabled yet. The API must be migrated from synchronous better-sqlite3 calls to async repositories before PostgreSQL can be used safely.',
-  )
-}
