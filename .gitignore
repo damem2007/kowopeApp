@@ -3,6 +3,7 @@
 !.env.example
 
 data/*.db
+data/*.sqlite
 data/*.db-*
 .vault-key.rotated
 
