@@ -59,6 +59,8 @@ function GuestDesktopPane() {
         <div className="auth-guest-row auth-guest-heading"><span /><b>Guest</b><b>Account</b></div>
         <div className="auth-guest-row"><span>Create invoices and clients</span><strong className="guest-yes">✓</strong><strong className="guest-yes">✓</strong></div>
         <div className="auth-guest-row"><span>Download invoices as PDF</span><strong className="guest-yes">✓</strong><strong className="guest-yes">✓</strong></div>
+        <div className="auth-guest-row"><span>AES-256 encryption to protect sensitive data at rest</span><strong className="guest-yes">✓</strong><strong className="guest-yes">✓</strong></div>
+        <div className="auth-guest-row"><span>TLS encryption to secure data in transit</span><strong className="guest-yes">✓</strong><strong className="guest-yes">✓</strong></div>
         <div className="auth-guest-row"><span>Keep your work</span><em>Until you leave</em><strong className="guest-yes">✓</strong></div>
         <div className="auth-guest-row"><span>Send by email</span><strong className="guest-no">×</strong><strong className="guest-yes">✓</strong></div>
         <div className="auth-guest-row"><span>Recurring invoices</span><strong className="guest-no">×</strong><strong className="guest-yes">✓</strong></div>
