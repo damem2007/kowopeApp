@@ -1173,7 +1173,8 @@ app.delete('/api/invoices/:id', async (req, res) => {
 });
 app.post('/api/payments', async (req, res) => {
     const { invoiceId, method = 'Manual', date, amount } = req.body;
-    const invoice = await db.prepare('SELECT * FROM invoices WHERE organization_id = ? AND (id = ? OR number = ?)').get(req.user.organization_id, invoiceId, invoiceId);
+    const invoice = await db.prepare('SELECT * FROM invoices WHERE (user_id = ? OR organization_id = ?) AND (id = ? OR number = ?)').get(req.user.id, req.user.organization_id, invoiceId, invoiceId);
+    //console.log("Creating payment:", { invoice });
     if (!invoice)
         return res.status(404).json({ error: 'Invoice not found.' });
     if (!date || !(Number(amount) > 0))

@@ -100,10 +100,33 @@ export const cancelRecurring = async recurringIndex => {
   } catch (error) { toast(error.message) }
 }
 
-export const svNew = clientIndex => { state.sv = { businessProfileId: state.numberingBusinessProfileId ?? state.businessProfiles[0]?.id ?? null, c: clientIndex === undefined ? "" : clientIndex, d: "", f: "Monthly", hist: 0, n: 1, a: '', start: '', na: '', from: "", durationMode: 'perpetual', occurrenceCount: 1, auto: 0, note: 0, s: 0, err: "" }; state.currentRoute = "svc"; render(); scrollTo(0, 0) }
+export const svNew = clientIndex => {
+  state.sv = {
+    businessProfileId: state.numberingBusinessProfileId ?? state.businessProfiles[0]?.id ?? null,
+    c: clientIndex === undefined ? "" : clientIndex,
+    d: "",
+    f: "Monthly",
+    hist: 0,
+    n: 1,
+    a: '',
+    start: '',
+    na: '',
+    from: "",
+    durationMode: 'perpetual',
+    occurrenceCount: 1,
+    auto: 0,
+    note: 0,
+    s: 0,
+    err: ""
+  };
+  state.currentRoute = "svc";
+  render();
+  scrollTo(0, 0);
+}
 
 export const svNext = () => {
-  const serviceState = state.sv, hasValidHistoryStart = isValidDate(serviceState.start), historicalDates = serviceState.hist && hasValidHistoryStart ? hdates(serviceState) : []; serviceState.err = ""
+  const serviceState = state.sv, hasValidHistoryStart = isValidDate(serviceState.start), historicalDates = serviceState.hist && hasValidHistoryStart ? hdates(serviceState) : [];
+  serviceState.err = ""
   if (serviceState.s === 0 && (serviceState.c === "" || !serviceState.d.trim())) serviceState.err = "Choose a client and describe the service."
   else if (serviceState.s === 1 && serviceState.hist) { if (!(serviceState.n >= 1 && serviceState.n <= 36) || !(serviceState.a > 0) || !hasValidHistoryStart) serviceState.err = "Enter how many invoices, the amount each and a valid first invoice date."; else if (historicalDates[historicalDates.length - 1] > today) serviceState.err = "Past invoices cannot be dated in the future." }
   else if (serviceState.s === 2) { if (!(serviceState.na > 0)) serviceState.err = "Enter the price for new invoices."; else if (!serviceState.from || serviceState.from < today || (serviceState.hist && serviceState.from <= historicalDates[historicalDates.length - 1])) serviceState.err = "The first new invoice must be today or later, and after your last past invoice."; else if (serviceState.durationMode === 'finite' && (!Number.isInteger(Number(serviceState.occurrenceCount)) || serviceState.occurrenceCount < 1 || serviceState.occurrenceCount > 120)) serviceState.err = "Choose between 1 and 120 future invoices, or select a perpetual schedule." }

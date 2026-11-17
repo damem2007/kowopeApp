@@ -127,9 +127,13 @@ export function shell(pageContent) {
         logoutAccount();
       }}>Sign out</button></aside><main>{pageContent}</main>{mobileTabs}{mobileMenuMarkup()}</div>;
 }
-export const hdr = (title: any, subtitle: any = undefined, headerAction: any = undefined) => <div className="hd"><div><h1>{title}</h1>{subtitle ? <p>{subtitle}</p> : ''}</div>{headerAction === undefined ? <button className="btn" onClick={event => {
-    newInv();
-  }}>+ New invoice</button> : headerAction}</div>;
+export const hdr = (title: any, subtitle: any = undefined, headerAction: any = undefined) => 
+        <div className="hd">
+          <div><h1>{title}</h1>{subtitle ? <p>{subtitle}</p> : ''}</div>
+         {headerAction === undefined ? <button className="btn" onClick={event => {
+            newInv();
+          }}>+ New invoice</button> : headerAction}
+        </div>;
 export const renderProviderBadge = providerId => <div className="ib" style={{
   "background": providers[providerId][3]
 }}>{providers[providerId][2]}</div>;

@@ -10,15 +10,9 @@ export function clients() {
     <td className="mut">{[clientDetails.e, clientDetails.p].filter(Boolean).join(" · ") || "—"}</td>
     <td>{clientInvoices.length}</td>
     <td className="r">{formatMoney(clientInvoices.reduce((total, invoice) => total + invoice.a, 0))}</td>
-    <td className="r"><button className="btn s sm" onClick={event => {
-          editClient(clientIndex);
-        }}>Edit</button> <button className="btn s sm" onClick={event => {
-          state.pc = clientIndex;
-          state.activeModal = 'past';
-          render();
-        }}>Add past invoice</button> <button className="btn sm" onClick={event => {
-          svNew(clientIndex);
-        }}>Recurring service</button></td></tr>;
+    <td className="r"><button className="btn s sm" onClick={event => {editClient(clientIndex); }}>Edit</button> 
+        <button className="btn s sm" onClick={event => {state.pc = clientIndex; state.activeModal = 'past'; render();}}>Add past invoice</button> 
+        <button className="btn sm" onClick={event => {svNew(clientIndex);}}>Recurring service</button></td></tr>;
   });
   return <>{hdr("Clients", state.clientNames.length + (state.clientNames.length === 1 ? " saved client" : " saved clients"), <button className="btn" onClick={event => {
       state.activeModal = 'client';

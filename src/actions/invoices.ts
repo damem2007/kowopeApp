@@ -197,15 +197,37 @@ export const savePast = async () => {
   if (readField("qp") < readField("qi")) return showError("The paid date cannot be before the issue date.")
   if (readField("qp") > today) return showError("The paid date cannot be in the future.")
   try {
-    const response = await fetch('/api/invoices', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ businessProfileId: state.numberingBusinessProfileId || state.businessProfiles[0]?.id || null, clientId: state.clientIds[clientIndex], description: readField('qx') || 'Past invoice', amount: paidAmount, dueDate: readField('qd') || null, issueDate: readField('qi'), isPast: true, currency: state.defaultCurrency, lineItems: [{ description: readField('qx') || 'Past invoice', quantity: 1, unitPrice: paidAmount }] }) })
+    const response = await fetch("/api/invoices", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        businessProfileId: state.numberingBusinessProfileId || state.businessProfiles[0]?.id || null,
+        clientId: state.clientIds[clientIndex],
+        description: readField("qx") || "Past invoice",
+        amount: paidAmount,
+        dueDate: readField("qd") || null,
+        issueDate: readField("qi"),
+        isPast: true,
+        currency: state.defaultCurrency,
+        lineItems: [{
+            description: readField("qx") || "Past invoice",
+            quantity: 1,
+            unitPrice: paidAmount,
+          }],
+      }),
+    });
     const savedInvoice = await response.json()
-    if (!response.ok) throw new Error(savedInvoice.error || 'Unable to save past invoice')
-    const paymentResponse = await fetch('/api/payments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ invoiceId: savedInvoice.number, method: 'Manual', date: readField('qp'), amount: paidAmount }) })
-    const savedPayment = await paymentResponse.json()
-    if (!paymentResponse.ok) throw new Error(savedPayment.error || 'Unable to save past payment')
-    state.invoices.unshift({ id: savedInvoice.number, c: clientIndex, a: paidAmount, iss: readField('qi'), due: readField('qd'), s: 'Paid', old: 1, d: readField('qx'), businessProfileId: savedInvoice.business_profile_id })
-    state.payments.push({ d: savedPayment.date, inv: savedInvoice.number, c: clientIndex, m: 'Manual', a: Number(savedPayment.amount) })
-    state.pc = undefined
+    if (!response.ok) throw new Error(savedInvoice.error || 'Unable to save past invoice');
+    const paymentResponse = await fetch('/api/payments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ invoiceId: savedInvoice.number, method: 'Manual', date: readField('qp'), amount: paidAmount })
+    });
+    const savedPayment = await paymentResponse.json();
+    if (!paymentResponse.ok) throw new Error(savedPayment.error || 'Unable to save past payment');
+    state.invoices.unshift({ id: savedInvoice.number, c: clientIndex, a: paidAmount, iss: readField('qi'), due: readField('qd'), s: 'Paid', old: 1, d: readField('qx'), businessProfileId: savedInvoice.business_profile_id });
+    state.payments.push({ d: savedPayment.date, inv: savedInvoice.number, c: clientIndex, m: 'Manual', a: Number(savedPayment.amount) });
+    state.pc = undefined;
     if (makeRecurring) { state.mr = savedInvoice.number; state.activeModal = 'mkrec'; return render() }
     state.activeModal = null; toast(savedInvoice.number + ' added as a paid invoice')
   } catch (error) { showError(error.message) }
