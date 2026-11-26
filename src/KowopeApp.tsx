@@ -4,6 +4,7 @@ import { overview } from './pages/overview.tsx'
 import { invoices } from './pages/invoices.tsx'
 import { clients } from './pages/clients.tsx'
 import { payments } from './pages/payments.tsx'
+import { reports } from './pages/reports.tsx'
 import { integrations } from './pages/integrations.tsx'
 import { settings } from './pages/settings.tsx'
 import { editor } from './pages/editor.tsx'
@@ -28,6 +29,7 @@ const pageComponents = {
   invoices,
   clients,
   payments,
+  reports,
   integrations,
   users: platformUsers,
   organization,

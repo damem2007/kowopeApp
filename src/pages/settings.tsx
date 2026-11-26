@@ -4,6 +4,9 @@ import { state } from '../modules/store.ts';
 import { currencySigns, currencyNames } from '../modules/catalog.tsx';
 import { renderDetails, renderPill } from '../modules/format.tsx';
 import { hdr } from '../ui/layout.tsx';
+import { addCur, delCur, runManualBackup, saveSecuritySettings, setDefaultCurrency } from '../actions/settings.ts';
+import { changePassword, setSignupAllowed } from '../actions/auth.ts';
+import { go, render } from '../ui/render.tsx';
 export const curCard = () => <div className="card"><div className="row b" style={{
     "flexWrap": "wrap"
   }}><div><h2>Currencies</h2><span className="mut">Choose from these on any invoice. The default is pre-selected on new invoices.</span></div><button className="btn s sm" onClick={event => {
@@ -67,5 +70,5 @@ export function settings() {
       state.activeModal = 'biz';
       state.be = -1;
       render();
-    }}>+ Add business</button>)}<div className="settings-band"><h2>Business & invoicing</h2><span className="line" /></div><div className="settings-grid settings-business-grid">{businessCards}<div className="settings-card c8">{invoiceNumberingCard()}</div><div className="settings-card c12">{curCard()}</div></div><div className="settings-band">{accountBand}<span className="line" /></div><div className="settings-grid">{accountCard}{ownerCards}</div></div>;
+    }}>+ Add business</button>)}<div className="settings-band"><h2>Business & invoicing</h2><span className="line" /></div><div className="settings-grid settings-business-grid">{businessCards}<div className="settings-card c12">{invoiceNumberingCard()}</div><div className="settings-card c12">{curCard()}</div></div><div className="settings-band">{accountBand}<span className="line" /></div><div className="settings-grid">{accountCard}{ownerCards}</div></div>;
 }

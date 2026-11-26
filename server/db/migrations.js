@@ -656,6 +656,112 @@ const migrations = [
       }
     },
   },
+  {
+    version: 36,
+    description: 'Align payment ownership with the scope of each linked invoice',
+    apply(db) {
+      db.exec(`UPDATE payments
+        SET organization_id = (SELECT organization_id FROM invoices WHERE invoices.id = payments.invoice_id),
+            user_id = (SELECT user_id FROM invoices WHERE invoices.id = payments.invoice_id)
+        WHERE EXISTS (SELECT 1 FROM invoices WHERE invoices.id = payments.invoice_id)`)
+    },
+  },
+  {
+    version: 37,
+    description: 'Scope invoice numbers to their issuing business profile',
+    requiresForeignKeysDisabled: true,
+    apply(db) {
+      // SQLite cannot remove a column-level UNIQUE constraint in place. Rebuild
+      // the invoice family while preserving every row and foreign-key value.
+      db.exec(`
+        ALTER TABLE invoices RENAME TO invoices_legacy_invoice_number_scope;
+        ALTER TABLE payments RENAME TO payments_legacy_invoice_number_scope;
+        ALTER TABLE recurring_schedules RENAME TO recurring_schedules_legacy_invoice_number_scope;
+        ALTER TABLE line_items RENAME TO line_items_legacy_invoice_number_scope;
+
+        CREATE TABLE invoices (
+          id TEXT PRIMARY KEY,
+          number TEXT NOT NULL,
+          client_name TEXT NOT NULL,
+          client_email TEXT NOT NULL,
+          description TEXT NOT NULL,
+          amount REAL NOT NULL,
+          currency TEXT NOT NULL DEFAULT 'USD',
+          payment_instructions TEXT NOT NULL DEFAULT '',
+          due_date TEXT,
+          status TEXT NOT NULL DEFAULT 'Draft',
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          sent_at TEXT,
+          client_id TEXT REFERENCES clients(id),
+          schedule_id INTEGER REFERENCES recurring_schedules(id),
+          is_past INTEGER NOT NULL DEFAULT 0,
+          issue_date TEXT,
+          paid_at TEXT,
+          organization_id INTEGER REFERENCES organizations(id),
+          user_id TEXT REFERENCES users(id),
+          business_profile_id INTEGER REFERENCES business_profile(id)
+        );
+        CREATE TABLE recurring_schedules (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          client_id TEXT NOT NULL REFERENCES clients(id),
+          business_id INTEGER,
+          description TEXT NOT NULL,
+          frequency TEXT NOT NULL,
+          currency_code TEXT NOT NULL DEFAULT 'USD',
+          status TEXT NOT NULL DEFAULT 'active',
+          next_run_at TEXT NOT NULL,
+          end_at TEXT,
+          auto_send INTEGER NOT NULL DEFAULT 0,
+          source_invoice_id TEXT REFERENCES invoices(id),
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          organization_id INTEGER REFERENCES organizations(id),
+          user_id TEXT REFERENCES users(id),
+          business_profile_id INTEGER REFERENCES business_profile(id)
+        );
+        CREATE TABLE payments (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          invoice_id TEXT NOT NULL REFERENCES invoices(id),
+          client_id TEXT REFERENCES clients(id),
+          date TEXT NOT NULL,
+          source TEXT NOT NULL DEFAULT 'Manual',
+          method TEXT,
+          amount REAL NOT NULL,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          organization_id INTEGER REFERENCES organizations(id),
+          user_id TEXT REFERENCES users(id)
+        );
+        CREATE TABLE line_items (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          invoice_id TEXT NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
+          description TEXT NOT NULL,
+          quantity REAL NOT NULL DEFAULT 1,
+          unit_price REAL NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+
+        INSERT INTO recurring_schedules (id, client_id, business_id, description, frequency, currency_code, status, next_run_at, end_at, auto_send, source_invoice_id, created_at, organization_id, user_id, business_profile_id)
+          SELECT id, client_id, business_id, description, frequency, currency_code, status, next_run_at, end_at, auto_send, source_invoice_id, created_at, organization_id, user_id, business_profile_id FROM recurring_schedules_legacy_invoice_number_scope;
+        INSERT INTO invoices (id, number, client_name, client_email, description, amount, currency, payment_instructions, due_date, status, created_at, sent_at, client_id, schedule_id, is_past, issue_date, paid_at, organization_id, user_id, business_profile_id)
+          SELECT id, number, client_name, client_email, description, amount, currency, payment_instructions, due_date, status, created_at, sent_at, client_id, schedule_id, is_past, issue_date, paid_at, organization_id, user_id, business_profile_id FROM invoices_legacy_invoice_number_scope;
+        INSERT INTO payments (id, invoice_id, client_id, date, source, method, amount, created_at, organization_id, user_id)
+          SELECT id, invoice_id, client_id, date, source, method, amount, created_at, organization_id, user_id FROM payments_legacy_invoice_number_scope;
+        INSERT INTO line_items (id, invoice_id, description, quantity, unit_price, created_at)
+          SELECT id, invoice_id, description, quantity, unit_price, created_at FROM line_items_legacy_invoice_number_scope;
+
+        DROP TABLE invoices_legacy_invoice_number_scope;
+        DROP TABLE payments_legacy_invoice_number_scope;
+        DROP TABLE recurring_schedules_legacy_invoice_number_scope;
+        DROP TABLE line_items_legacy_invoice_number_scope;
+
+        CREATE UNIQUE INDEX idx_invoices_business_number ON invoices(business_profile_id, number) WHERE business_profile_id IS NOT NULL;
+        CREATE UNIQUE INDEX idx_invoices_legacy_number ON invoices(number) WHERE business_profile_id IS NULL;
+        CREATE INDEX idx_invoices_business_profile_id ON invoices(business_profile_id);
+        CREATE INDEX idx_invoices_schedule_run ON invoices(schedule_id, issue_date) WHERE schedule_id IS NOT NULL AND issue_date IS NOT NULL;
+        CREATE INDEX idx_payments_user_id ON payments(user_id);
+        CREATE INDEX idx_recurring_schedules_user_id ON recurring_schedules(user_id);
+      `)
+    },
+  },
 
 ]
 
@@ -673,7 +779,19 @@ export function runMigrations(db) {
     if (destructiveLiveTable.test(migrationSource)) {
       throw new Error(`Migration ${migration.version} contains a destructive operation on live data. Create a preserving migration instead.`)
     }
-    db.transaction(() => { migration.apply(db); recordMigration.run(migration.version) })()
+    if (migration.requiresForeignKeysDisabled) {
+      // PRAGMA foreign_keys is a no-op inside a SQLite transaction. Disable it
+      // before entering the preserving rebuild transaction, then restore it
+      // immediately after the schema and migration record commit together.
+      db.pragma('foreign_keys = OFF')
+      try {
+        db.transaction(() => { migration.apply(db); recordMigration.run(migration.version) })()
+      } finally {
+        db.pragma('foreign_keys = ON')
+      }
+    } else {
+      db.transaction(() => { migration.apply(db); recordMigration.run(migration.version) })()
+    }
     console.log(`Applied database migration ${migration.version}`)
   }
 }

@@ -131,11 +131,8 @@ export const saveInvoiceNumbering = async () => {
     const { index, business } = getBusinessForSettings()
     const invoicePrefix = querySelector('#invoice-prefix').value.trim()
     const enteredPadding = Number(querySelector('#invoice-padding').value)
-    const invoicePadding = Number.isFinite(enteredPadding)
-      ? Math.min(10, Math.max(1, Math.trunc(enteredPadding)))
-      : 4
-    const invoiceFormat = querySelector('#invoice-format').value.trim()
-      || '{PREFIX}{YYYY}-{NUMBER}'
+    const invoicePadding = Number.isFinite(enteredPadding) ? Math.min(10, Math.max(1, Math.trunc(enteredPadding))) : 4
+    const invoiceFormat = querySelector('#invoice-format').value.trim() || '{PREFIX}{YYYY}-{NUMBER}'
 
     const allowedTokens = new Set(['{PREFIX}', '{YYYY}', '{YY}', '{NUMBER}'])
     const foundTokens = invoiceFormat.match(/\{[^{}]*\}/g) ?? []

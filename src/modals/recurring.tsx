@@ -4,15 +4,18 @@ import { formatDate, stepFrequency } from '../modules/date.ts';
 import { formatMoney } from '../modules/format.tsx';
 import { isMail } from '../modules/selectors.ts';
 import { nextOn } from '../modules/recurrence.ts';
+import { querySelector } from '../modules/selectors.ts';
+import { mrs, saveChg, saveRec } from '../actions/recurring.ts';
+import { render } from '../ui/render.tsx';
 export const makeRecurringModal = () => {
   const invoice = state.invoices.find(candidate => candidate.id === state.mr),
     nextDate = nextOn(invoice, "Monthly");
-  return <div className="ov c"><div className="md"><h2>Make {invoice.id} recurring</h2><p className="mut" style={{
+  return <div className="ov c"><div className="md"><h2>Make {invoice.number} recurring</h2><p className="mut" style={{
         "margin": "6px 0 0"
       }}>{state.clientNames[invoice.c].split(" (")[0]} is billed {formatMoney(invoice.a)} each time. Future invoices copy this one.</p><label className="fl">Amount for new invoices</label><input id="ma" type="number" min="0" step="0.01" defaultValue={invoice.a} /><div className="mut" style={{
         "fontSize": "12px"
-      }}>{invoice.id} keeps its {formatMoney(invoice.a)} in your history.</div><label className="fl">Frequency</label><select id="mf" onChange={event => {
-        $('#mrd').value = nextOn(state.invoices.find(candidate => candidate.id === state.mr), event.currentTarget.value);
+      }}>{invoice.number} keeps its {formatMoney(invoice.a)} in your history.</div><label className="fl">Frequency</label><select id="mf" onChange={event => {
+        (querySelector('#mrd') as HTMLInputElement).value = nextOn(state.invoices.find(candidate => candidate.id === state.mr), event.currentTarget.value);
         mrs();
       }} defaultValue="Monthly">{["Weekly", "Biweekly", "Monthly", "Quarterly", "Yearly"].map(frequency => <option key={frequency} value={frequency}>{frequency}</option>)}</select><label className="fl">First new invoice on</label><input type="date" id="mrd" defaultValue={nextDate} onChange={event => {
         mrs();

@@ -2,6 +2,8 @@ import React from 'react';
 import { state } from '../modules/store.ts';
 import { formatDate, today } from '../modules/date.ts';
 import { currencySigns } from '../modules/catalog.tsx';
+import { guestDownload, promptGuestLogin } from '../actions/auth.ts';
+import { render } from '../ui/render.tsx';
 const escapeHtml = value => String(value ?? ''); // React escapes rendered text and attributes automatically.
 const guestMoney = (amount, currencyCode) => {
   const customCurrency = (state.guestCurrencies || []).find(currency => currency.code === currencyCode);

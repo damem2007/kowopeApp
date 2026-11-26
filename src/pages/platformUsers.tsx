@@ -2,6 +2,7 @@ import React from 'react';
 import { state } from '../modules/store.ts';
 import { hdr } from '../ui/layout.tsx';
 import { renderPill } from '../modules/format.tsx';
+import { resendUserVerification, setUserSuspended } from '../actions/auth.ts';
 export function platformUsers() {
   if (state.authUserRole !== 'owner') return <>{hdr('Users', 'Owner access is required.')}<div className="card"><p className="mut">You do not have permission to manage platform users.</p></div></>;
   const users = state.platformUsers || [];

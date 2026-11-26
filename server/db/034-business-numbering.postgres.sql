@@ -59,7 +59,5 @@ INSERT INTO integrations (provider, status, account_label, config_json, connecte
 VALUES ('mailjet','connected','Mailjet account','kowope:v1:CFuIl4XE4ANy6yNo:xF3YExL4nHtvEOKPbDLPdg==:QLcEbd29iMYUTjJJEQ7uK3oEFci+6hefgh3IGwkTXfp/46RR3Dw6cGyDB2OeGfeZmQCPyPI0jHM5ZmFg81GMtsK7aTdpbgIx1HpCvP9T7zbnmX/jidvfwRRgic58j8Vg+nPbSvrja0XSKI0khCh4/4elOntCPLF57rnNpc9HH1RaJI47fHHLxo49j8Mmx7Cb+Uy2s4iA9BBota9Qsdqs1vx4099BlwDItGxutVjdHMV3Pu0ySoOKjuM/weHbKFcBePxEHHGq6BtYSmcc30WG4zOnqiC2A3eTxLUwjW1OMmz9Xm5OM0FEZc+1wYmQljHi3SR+SUmXEC8X1yMHdFeCnO4rmBQT21h6lEAtnh0lFBNElRLlTO/PkhY4MorCom6O9fygOCKpMZIV6Onf8M3qQIQFZvZX6pFxtL2119kgM/iYxHmR3/zR+nUjqI2uzi2u4ju/uLNB8g==',CURRENT_TIMESTAMP,NULL,NULL,NULL);
 COMMIT;
 
--- Historical invoices.number remains UNIQUE globally, for compatibility.
--- Two businesses choosing the same template will receive distinct generated
--- numbers, but the second business may skip a sequence value. Removing the
--- global UNIQUE constraint also requires an audited SQLite table rebuild.
+-- Migration 037 later replaces the historical global invoice-number
+-- constraint with business-profile-scoped uniqueness.

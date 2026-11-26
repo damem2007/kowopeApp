@@ -42,5 +42,8 @@ guestBusinessEditing: false,
 guestClientEditing: false,
 guestCurrencyEditorOpen: false,
 guestCurrencies: [],
+  reportFilters: null,
+  receivablesReport: null,
+  reportsLoading: false,
 };
 

@@ -2,6 +2,8 @@ import { state } from '../modules/store.ts'
 import { providers } from '../modules/catalog.tsx'
 import { integrationSteps, integrationStepLabels } from '../modules/integrationFlows.ts'
 import { renderProviderBadge } from '../ui/layout.tsx'
+import { insertEmailToken, wnext } from '../actions/integrations.ts'
+import { render } from '../ui/render.tsx'
 
 function WizardToggle({ label, checked }: { label: string; checked: boolean }) {
   const toggleId = `integration-toggle-${label.length}`

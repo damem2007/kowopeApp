@@ -38,6 +38,7 @@ export const editDraft = async id => {
     const editor = sample()
     const clientIndex = state.clientIds.findIndex(clientId => clientId === invoice.client_id)
     editor.invoiceId = id
+    editor.invoiceNumber = invoice.number
     editor.clientIndex = clientIndex >= 0 ? String(clientIndex) : ''
     const matchingBusiness = state.businessProfiles.findIndex(profile => profile.id === invoice.business_profile_id);
     editor.businessIndex = matchingBusiness >= 0 ? matchingBusiness : 0;
@@ -60,7 +61,7 @@ export const markPaid = async id => {
   try {
     const response = await fetch('/api/payments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ invoiceId: id, method: 'Manual', date: today, amount: invoice.a }) })
     const payment = await response.json(); if (!response.ok) throw new Error(payment.error || 'Unable to mark invoice paid')
-    invoice.s = 'Paid'; state.payments.push({ d: payment.date, inv: id, c: invoice.c, m: payment.method || 'Manual', a: Number(payment.amount) }); state.openMenuIndex = 0; toast(id + ' marked paid')
+    invoice.s = 'Paid'; state.payments.push({ d: payment.date, inv: invoice.number, c: invoice.c, m: payment.method || 'Manual', a: Number(payment.amount) }); state.openMenuIndex = 0; toast(invoice.number + ' marked paid')
   } catch (error) { toast(error.message) }
 }
 export const send = async id => {
@@ -73,7 +74,7 @@ export const send = async id => {
     const result = await response.json()
     if (!response.ok) throw new Error(result.error || 'Unable to send invoice')
     if (invoice) invoice.s = 'Sent'
-    toast(id + ' sent')
+    toast((invoice?.number || id) + ' sent')
   } catch (error) { toast(error.message) }
 }
 export const dup = async id => {
@@ -100,26 +101,28 @@ export const dup = async id => {
     const duplicateInvoice = await duplicateResponse.json()
     if (!duplicateResponse.ok) throw new Error(duplicateInvoice.error || 'Unable to duplicate invoice')
     const clientIndex = state.clientIds.findIndex(clientId => clientId === sourceDetails.client_id)
-    state.invoices.push({ id: duplicateInvoice.number, c: Math.max(0, clientIndex), a: Number(duplicateInvoice.amount), due: duplicateInvoice.due_date || '', s: duplicateInvoice.status || 'Draft', rec: false, cur: duplicateInvoice.currency || 'USD', n: duplicateInvoice.payment_instructions || '', businessProfileId: duplicateInvoice.business_profile_id })
+    state.invoices.push({ id: duplicateInvoice.id, number: duplicateInvoice.number, c: Math.max(0, clientIndex), a: Number(duplicateInvoice.amount), due: duplicateInvoice.due_date || '', s: duplicateInvoice.status || 'Draft', rec: false, cur: duplicateInvoice.currency || 'USD', n: duplicateInvoice.payment_instructions || '', businessProfileId: duplicateInvoice.business_profile_id })
     toast(`${duplicateInvoice.number} duplicated as draft`)
   } catch (error) { toast(error.message) }
 }
 export const del = async id => {
+  const invoice = state.invoices.find(item => item.id === id)
   try {
     const response = await fetch(`/api/invoices/${id}`, { method: 'DELETE' });
     const result = response.status === 204 ? {} : await response.json();
     if (!response.ok) throw new Error(result.error || 'Unable to delete invoice')
     const index = state.invoices.findIndex(invoice => invoice.id === id);
     if (index >= 0) state.invoices.splice(index, 1);
-    toast(id + ' deleted')
+    toast((invoice?.number || id) + ' deleted')
   } catch (error) { toast(error.message) }
 }
 
 export const downloadInvoice = async id => {
+  const invoice = state.invoices.find(item => item.id === id)
   const response = await fetch(`/api/invoices/${id}/pdf`)
   if (!response.ok) return toast('Unable to download invoice')
-  saveBlob(await response.blob(), `${id}.pdf`)
-  toast(id + ' downloaded')
+  saveBlob(await response.blob(), `${invoice?.number || 'invoice'}.pdf`)
+  toast((invoice?.number || 'Invoice') + ' downloaded')
 }
 
 export const downloadPreviewPdf = async () => {
@@ -134,7 +137,7 @@ export const downloadPreviewPdf = async () => {
     const response = await fetch('/api/invoices/preview/pdf', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        number: editor.invoiceId || 'PREVIEW',
+        number: editor.invoiceNumber || 'PREVIEW',
         clientName: editor.clientIndex !== '' ? state.clientNames[editor.clientIndex] : 'Client',
         clientEmail: details.e || '', clientAddress: details.a || '',
         description: items.map(item => item.description || 'Line item').join(', '),
@@ -166,9 +169,9 @@ export async function save(mode) {
   const response = await fetch(editor.invoiceId ? `/api/invoices/${encodeURIComponent(editor.invoiceId)}` : '/api/invoices', { method: editor.invoiceId ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
   const invoice = await response.json()
   if (!response.ok) { editor.err = [invoice.error || 'Unable to save invoice.']; return toast(editor.err[0]) }
-  const saved = state.invoices.find(item => item.id === (editor.invoiceId || invoice.number));
+  const saved = state.invoices.find(item => item.id === (editor.invoiceId || invoice.id));
   const summary = {
-    id: invoice.number, c: Number(editor.clientIndex), a: totalAmount,
+    id: invoice.id, number: invoice.number, c: Number(editor.clientIndex), a: totalAmount,
     due: editor.dueDate || '', s: invoice.status || 'Draft',
     rec: Boolean(invoice.schedule_id), cur: editor.currency,
     n: editor.paymentInstructions, businessProfileId: invoice.business_profile_id ?? businessProfile.id ?? null,
@@ -181,10 +184,10 @@ export async function save(mode) {
     saveBlob(await pdf.blob(), `${invoice.number}.pdf`)
   }
   if (mode === 'send') {
-    const sendResponse = await fetch(`/api/invoices/${encodeURIComponent(invoice.number)}/send`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ logoDataUrl: invoiceLogo }) })
+    const sendResponse = await fetch(`/api/invoices/${encodeURIComponent(invoice.id)}/send`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ logoDataUrl: invoiceLogo }) })
     const sendResult = await sendResponse.json()
     if (!sendResponse.ok) return toast(sendResult.error || 'Invoice saved as draft, but it could not be sent.')
-    const sentInvoice = state.invoices.find(item => item.id === invoice.number)
+    const sentInvoice = state.invoices.find(item => item.id === invoice.id)
     if (sentInvoice) sentInvoice.s = 'Sent'
   }
   state.invoiceEditor = null; state.currentRoute = 'invoices'; state.activeInvoiceTab = 'All'; toast(mode === 'pdf' ? `${invoice.number} saved. PDF downloaded` : mode === 'send' ? `${invoice.number} saved and sent` : `${invoice.number} saved as draft`)
@@ -201,7 +204,8 @@ export const savePast = async () => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        businessProfileId: state.numberingBusinessProfileId || state.businessProfiles[0]?.id || null,
+        businessProfileId: state.businessProfiles[+readField('qb')]?.id || state.numberingBusinessProfileId || state.businessProfiles[0]?.id || null,
+        invoiceNumber: readField('qn').trim(),
         clientId: state.clientIds[clientIndex],
         description: readField("qx") || "Past invoice",
         amount: paidAmount,
@@ -221,14 +225,14 @@ export const savePast = async () => {
     const paymentResponse = await fetch('/api/payments', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ invoiceId: savedInvoice.number, method: 'Manual', date: readField('qp'), amount: paidAmount })
+      body: JSON.stringify({ invoiceId: savedInvoice.id, method: 'Manual', date: readField('qp'), amount: paidAmount })
     });
     const savedPayment = await paymentResponse.json();
     if (!paymentResponse.ok) throw new Error(savedPayment.error || 'Unable to save past payment');
-    state.invoices.unshift({ id: savedInvoice.number, c: clientIndex, a: paidAmount, iss: readField('qi'), due: readField('qd'), s: 'Paid', old: 1, d: readField('qx'), businessProfileId: savedInvoice.business_profile_id });
+    state.invoices.unshift({ id: savedInvoice.id, number: savedInvoice.number, c: clientIndex, a: paidAmount, iss: readField('qi'), due: readField('qd'), s: 'Paid', old: 1, d: readField('qx'), businessProfileId: savedInvoice.business_profile_id });
     state.payments.push({ d: savedPayment.date, inv: savedInvoice.number, c: clientIndex, m: 'Manual', a: Number(savedPayment.amount) });
     state.pc = undefined;
-    if (makeRecurring) { state.mr = savedInvoice.number; state.activeModal = 'mkrec'; return render() }
+    if (makeRecurring) { state.mr = savedInvoice.id; state.activeModal = 'mkrec'; return render() }
     state.activeModal = null; toast(savedInvoice.number + ' added as a paid invoice')
   } catch (error) { showError(error.message) }
 }

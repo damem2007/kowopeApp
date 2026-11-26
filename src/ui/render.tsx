@@ -2,7 +2,9 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { state } from '../modules/store.ts';
 import { App } from '../KowopeApp.tsx';
-let reactRoot;
+type KowopeRootContainer = HTMLElement & {
+  __kowopeReactRoot?: ReturnType<typeof createRoot>
+};
 let browserNavigationReady = false;
 let isRestoringBrowserNavigation = false;
 let lastRenderedView = '';
@@ -84,9 +86,12 @@ export function KowopeApp() {
   }} />;
 }
 export function render() {
-  const container = document.querySelector('#root');
+  const container = document.querySelector('#root') as KowopeRootContainer | null;
   if (!container) throw new Error('Missing #root element.');
-  if (!reactRoot) reactRoot = createRoot(container);
+  // Keep the root on the DOM container rather than module state. Vite can
+  // re-evaluate this module during development while React still owns #root.
+  // Reusing the container's root prevents a second createRoot() call.
+  if (!container.__kowopeReactRoot) container.__kowopeReactRoot = createRoot(container);
   syncBrowserHistory();
-  reactRoot.render(<KowopeApp />);
+  container.__kowopeReactRoot.render(<KowopeApp />);
 }

@@ -115,20 +115,18 @@ export async function resolveInvoiceBusiness(database, {
  * Must be called within db.transaction(...). Two callers racing for the same
  * business increment the same row; neither can allocate the same sequence.
  *
- * Legacy invoices may already have occupied numbers. Collision checks avoid
- * reusing them while the old database-wide UNIQUE(number) constraint remains.
+ * Invoice numbers are unique only for the issuing business profile. This
+ * permits independent businesses to use the same external-facing number.
  */
 export async function nextInvoiceNumber(database, businessProfile, issueDate) {
   if (!businessProfile || !Number.isSafeInteger(Number(businessProfile.id))) {
     throw new Error('Valid business profile required for invoice allocation.')
   }
 
-  // Under the historical global UNIQUE(number) constraint, cross-business
-  // collision checks must be serialized as well as each business's counter.
   if (typeof database.lockInvoiceNumbering !== 'function') {
     throw new Error('The database adapter must implement lockInvoiceNumbering().')
   }
-  await database.lockInvoiceNumbering()
+  await database.lockInvoiceNumbering(Number(businessProfile.id))
 
   for (let attempts = 0; attempts < 10000; attempts += 1) {
     const allocation = await database.maybeOne(
@@ -142,10 +140,11 @@ export async function nextInvoiceNumber(database, businessProfile, issueDate) {
     const sequenceNumber = Number(allocation?.allocated)
     const number = formatInvoiceNumber(businessProfile, sequenceNumber, issueDate)
 
-    // Historical schema has invoices.number globally UNIQUE.
+    // Manual past invoices may already use a number produced by this profile's
+    // format, so only this profile's existing invoices block an allocation.
     const occupied = await database.maybeOne(
-      'SELECT id FROM invoices WHERE number = ?',
-      [number],
+      'SELECT id FROM invoices WHERE business_profile_id = ? AND number = ?',
+      [businessProfile.id, number],
     )
     if (!occupied) return number
   }

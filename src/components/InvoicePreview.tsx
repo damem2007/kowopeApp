@@ -15,7 +15,7 @@ export function InvoicePreview() {
   const logo = invoice.logoDataUrl || !invoice.logoRemoved && business.logoDataUrl || '';
   const total = calcInvoice(invoice);
   const due = invoice.dueDate ? formatDate(invoice.dueDate) : 'Not set';
-  const number = invoice.invoiceId || 'Assigned when saved';
+  const number = invoice.invoiceNumber || 'Assigned when saved';
   return <div style={{
     maxWidth: 794,
     margin: '0 auto'

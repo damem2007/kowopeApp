@@ -2,6 +2,7 @@ import React from 'react';
 import { state } from '../modules/store.ts';
 import { currencySigns } from '../modules/catalog.tsx';
 import { today, addDays } from '../modules/date.ts';
+import { addGuestCurrency, addGuestItem, guestLivePreview, leaveGuestInvoice, promptGuestLogin, readGuestLogo, removeGuestItem, removeGuestLogo, syncGuestEditor, toggleGuestCurrencyEditor, updateGuestTotals } from '../actions/auth.ts';
 const escapeHtml = value => String(value ?? ''); // React escapes rendered text and attributes automatically.
 const guestMoney = (amount, code = state.guestInvoice.currency) => {
   const custom = state.guestCurrencies.find(currency => currency.code === code);
@@ -12,6 +13,7 @@ const guestMoney = (amount, code = state.guestInvoice.currency) => {
   })}`;
 };
 const value = () => state.guestInvoice;
+const guestDueDateInput = () => document.getElementById('guest-due-date') as HTMLInputElement;
 const editableContact = (kind, editing, name, address, email, phone, toggle) => editing ? <div className="guest-edit-fields">
       <input id={`guest-${kind}-name`} defaultValue={escapeHtml(name)} placeholder={kind === 'business' ? 'Your business name' : 'Client name'} />
       <textarea id={`guest-${kind}-address`} placeholder="Address" defaultValue={escapeHtml(address)} />
@@ -58,16 +60,16 @@ export const guestEditor = () => {
         <section><label className="mut">Due date</label><input id="guest-due-date" type="date" onChange={event => {
             syncGuestEditor();
           }} value={escapeHtml(invoice.dueDate || addDays(today, 30))} /><div className="invoice-due-chips"><button className="chip" onClick={event => {
-              document.getElementById('guest-due-date').value = '';
+              guestDueDateInput().value = '';
               syncGuestEditor();
             }}>On receipt</button><button className="chip" onClick={event => {
-              document.getElementById('guest-due-date').value = String(addDays(today, 15));
+              guestDueDateInput().value = String(addDays(today, 15));
               syncGuestEditor();
             }}>Net 15</button><button className="chip active" onClick={event => {
-              document.getElementById('guest-due-date').value = String(addDays(today, 30));
+              guestDueDateInput().value = String(addDays(today, 30));
               syncGuestEditor();
             }}>Net 30</button><button className="chip" onClick={event => {
-              document.getElementById('guest-due-date').value = String(addDays(today, 60));
+              guestDueDateInput().value = String(addDays(today, 60));
               syncGuestEditor();
             }}>Net 60</button></div></section>
       </div>

@@ -69,15 +69,13 @@ export function createPostgresAdapter({ connectionString = process.env.DATABASE_
       } finally { client.release() }
     }
   }
-  // Serialize recurring workers using this database. Lock releases on COMMIT
-  // or ROLLBACK. The constant identifies the Kowope recurring-invoice mutex.
-  // Serializes collision checks across ALL businesses while invoices.number
-  // is globally UNIQUE in the historical schema. Must hold a transaction.
-  async function lockInvoiceNumbering() {
+  // Lock only the issuing business's sequence. The lock releases on COMMIT or
+  // ROLLBACK, so separate businesses can allocate invoice numbers in parallel.
+  async function lockInvoiceNumbering(businessProfileId) {
     if (!context.getStore()?.client) {
       throw new Error('Invoice-numbering lock requires an active PostgreSQL transaction.')
     }
-    await query('SELECT pg_advisory_xact_lock(78301, 20261111)')
+    await query('SELECT pg_advisory_xact_lock(78301, ?)', [Number(businessProfileId)])
   }
 
   async function lockRecurring() {

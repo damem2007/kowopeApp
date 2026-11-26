@@ -2,6 +2,9 @@ import React from 'react';
 import { state } from "../modules/store.ts";
 import { formatMoney } from "../modules/format.tsx";
 import { hdr } from "../ui/layout.tsx";
+import { editClient } from '../actions/clients.ts';
+import { svNew } from '../actions/recurring.ts';
+import { render } from '../ui/render.tsx';
 export function clients() {
   const clientRows = state.clientNames.map((clientName, clientIndex) => {
     const clientInvoices = state.invoices.filter(invoice => invoice.c === clientIndex);

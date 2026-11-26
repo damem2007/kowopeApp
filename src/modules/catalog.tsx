@@ -21,6 +21,7 @@ export const icons = {
   invoices: <><path d="M6 3h9l4 4v14H6z" /><path d="M9 12h7M9 16h7" /></>,
   clients: <><circle cx="9" cy="8" r="3.5" /><path d="M2.500 20c.5-4 3-6 6.500-6s6 2 6.500 6" /><path d="M16 5a3.500 3.500 0 010 7" /></>,
   payments: <><rect x="3" y="6" width="18" height="13" rx="2" /><path d="M3 10h18" /></>,
+  reports: <><path d="M4 20V10M10 20V4M16 20v-7M22 20H2" /></>,
   integrations: <path d="M13 2L4 14h7l-1 8 9-12h-7z" />,
   users: <><circle cx="9" cy="8" r="3.5" /><path d="M2.5 20c.5-4 3-6 6.5-6s6 2 6.5 6" /><path d="M16 5a3.5 3.5 0 010 7M17 14c2.5.5 4 2.5 4.5 6" /></>,
   organization: <><rect x="4" y="3" width="16" height="18" rx="2" /><path d="M8 7h2M14 7h2M8 11h2M14 11h2M8 15h2M14 15h2M10 21v-3h4v3" /></>,

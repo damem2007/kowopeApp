@@ -20,6 +20,8 @@ import {
 } from './services/recurrence.js';
 import { startBackupService } from './services/backup.js';
 import { runScheduledBackup, runManualBusinessBackup } from './services/backup.js';
+import { accessibleScopeClause, accessibleScopeParameters } from './services/access-scope.js';
+import { buildReceivablesReport } from './services/reporting.js';
 import { decryptFields, decryptValue, encryptValue, businessFields, invoiceFields, clientFields } from './security/crypto.js';
 dotenv.config();
 const app = express();
@@ -688,7 +690,7 @@ app.get('/api/integrations/outlook/oauth/callback', requireOwner, async (req, re
         res.status(500).send(error.message);
     }
 });
-app.get('/api/recurring', async (req, res) => res.json((await db.prepare(req.user.organization_id ? 'SELECT s.*, c.name AS client_name, p.amount AS current_amount FROM recurring_schedules s JOIN clients c ON c.id = s.client_id LEFT JOIN schedule_price_history p ON p.schedule_id = s.id AND p.id = (SELECT id FROM schedule_price_history WHERE schedule_id = s.id ORDER BY effective_from DESC, id DESC LIMIT 1) WHERE s.organization_id = ? ORDER BY s.next_run_at' : 'SELECT s.*, c.name AS client_name, p.amount AS current_amount FROM recurring_schedules s JOIN clients c ON c.id = s.client_id LEFT JOIN schedule_price_history p ON p.schedule_id = s.id AND p.id = (SELECT id FROM schedule_price_history WHERE schedule_id = s.id ORDER BY effective_from DESC, id DESC LIMIT 1) WHERE s.organization_id IS NULL AND s.user_id = ? ORDER BY s.next_run_at').all(req.user.organization_id || req.user.id)).map(schedule => ({ ...schedule, client_name: decryptValue(schedule.client_name), description: decryptValue(schedule.description) }))));
+app.get('/api/recurring', async (req, res) => res.json((await db.prepare(`SELECT s.*, c.name AS client_name, source.number AS source_invoice_number, p.amount AS current_amount FROM recurring_schedules s JOIN clients c ON c.id = s.client_id LEFT JOIN invoices source ON source.id = s.source_invoice_id LEFT JOIN schedule_price_history p ON p.schedule_id = s.id AND p.id = (SELECT id FROM schedule_price_history WHERE schedule_id = s.id ORDER BY effective_from DESC, id DESC LIMIT 1) WHERE ${accessibleScopeClause('s')} ORDER BY s.next_run_at`).all(...accessibleScopeParameters(req.user))).map(schedule => ({ ...schedule, client_name: decryptValue(schedule.client_name), description: decryptValue(schedule.description) }))));
 app.post('/api/recurring', async (req, res) => {
     const {
         clientId, description, amount, frequency, nextRunAt,
@@ -979,11 +981,11 @@ app.put("/api/business-profile", async (req, res) => {
     }
 });
 app.get("/api/clients", async (req, res) => res.json((await db
-    .prepare(`SELECT c.*, COUNT(i.id) AS invoice_count, COALESCE(SUM(CASE WHEN i.status != 'Paid' THEN i.amount ELSE 0 END), 0) AS outstanding FROM clients c LEFT JOIN invoices i ON i.client_id = c.id WHERE c.created_by_user_id = ? GROUP BY c.id ORDER BY c.name`)
-    .all(req.user.id)).map(decryptClient)));
+    .prepare(`SELECT c.*, COUNT(i.id) AS invoice_count, COALESCE(SUM(CASE WHEN i.status != 'Paid' THEN i.amount ELSE 0 END), 0) AS outstanding FROM clients c LEFT JOIN invoices i ON i.client_id = c.id WHERE ${accessibleScopeClause('c', 'created_by_user_id')} GROUP BY c.id ORDER BY c.name`)
+    .all(...accessibleScopeParameters(req.user))).map(decryptClient)));
 app.get("/api/clients/:id/invoices", async (req, res) => res.json((await db
-    .prepare("SELECT i.* FROM invoices i JOIN clients c ON c.id = i.client_id WHERE i.client_id = ? AND c.created_by_user_id = ? ORDER BY i.id DESC")
-    .all(req.params.id, req.user.id)).map(decryptInvoice)));
+    .prepare(`SELECT i.* FROM invoices i JOIN clients c ON c.id = i.client_id WHERE i.client_id = ? AND ${accessibleScopeClause('c', 'created_by_user_id')} AND ${accessibleScopeClause('i')} ORDER BY i.id DESC`)
+    .all(req.params.id, ...accessibleScopeParameters(req.user), ...accessibleScopeParameters(req.user))).map(decryptInvoice)));
 app.post("/api/clients", async (req, res) => {
     const { name, email, company = "", address = "", phone = "", notes = "", } = req.body;
     if (!name || !email)
@@ -1018,8 +1020,8 @@ app.patch("/api/clients/:id", async (req, res) => {
             .status(400)
             .json({ error: "Client name and email are required." });
     try {
-        await db.prepare("UPDATE clients SET name = ?, email = ?, company = ?, address = ?, phone = ?, notes = ? WHERE id = ? AND created_by_user_id = ?").run(encryptValue(name), encryptValue(email), encryptValue(company), encryptValue(address), encryptValue(phone), encryptValue(notes), req.params.id, req.user.id);
-        res.json(decryptClient(await db.prepare("SELECT * FROM clients WHERE id = ? AND created_by_user_id = ?").get(req.params.id, req.user.id)));
+        await db.prepare(`UPDATE clients SET name = ?, email = ?, company = ?, address = ?, phone = ?, notes = ? WHERE id = ? AND ${accessibleScopeClause('', 'created_by_user_id')}`).run(encryptValue(name), encryptValue(email), encryptValue(company), encryptValue(address), encryptValue(phone), encryptValue(notes), req.params.id, ...accessibleScopeParameters(req.user));
+        res.json(decryptClient(await db.prepare(`SELECT * FROM clients WHERE id = ? AND ${accessibleScopeClause('', 'created_by_user_id')}`).get(req.params.id, ...accessibleScopeParameters(req.user))));
     }
     catch (error) {
         res
@@ -1033,24 +1035,99 @@ app.patch("/api/clients/:id", async (req, res) => {
 });
 app.delete("/api/clients/:id", async (req, res) => {
     const linked = (await db
-        .prepare("SELECT COUNT(*) AS count FROM invoices i JOIN clients c ON c.id = i.client_id WHERE i.client_id = ? AND c.created_by_user_id = ?")
-        .get(req.params.id, req.user.id)).count;
+        .prepare(`SELECT COUNT(*) AS count FROM invoices i JOIN clients c ON c.id = i.client_id WHERE i.client_id = ? AND ${accessibleScopeClause('c', 'created_by_user_id')} AND ${accessibleScopeClause('i')}`)
+        .get(req.params.id, ...accessibleScopeParameters(req.user), ...accessibleScopeParameters(req.user))).count;
     if (linked > 0)
         return res
             .status(409)
             .json({
             error: "This client has linked invoices and cannot be deleted.",
         });
-    await db.prepare("DELETE FROM clients WHERE id = ? AND created_by_user_id = ?").run(req.params.id, req.user.id);
+    await db.prepare(`DELETE FROM clients WHERE id = ? AND ${accessibleScopeClause('', 'created_by_user_id')}`).run(req.params.id, ...accessibleScopeParameters(req.user));
     res.status(204).end();
 });
+const reportDate = value => /^\d{4}-\d{2}-\d{2}$/.test(String(value || '')) ? String(value) : new Date().toISOString().slice(0, 10);
+const reportStartDate = value => /^\d{4}-\d{2}-\d{2}$/.test(String(value || '')) ? String(value) : `${new Date().toISOString().slice(0, 7)}-01`;
+
+// This is a receivables report, derived from invoices and payments. It remains
+// deliberately separate from future ledger-grade financial statements.
+app.get('/api/reports/receivables', async (req, res) => {
+    const asOfDate = reportDate(req.query.asOf);
+    const fromDate = reportStartDate(req.query.from);
+    const toDate = reportDate(req.query.to || asOfDate);
+    if (fromDate > toDate || toDate > asOfDate) return res.status(400).json({ error: 'Choose a valid reporting range ending on or before the as-of date.' });
+    const platformScope = req.query.scope === 'platform';
+    if (platformScope && req.user.role !== 'owner') return res.status(403).json({ error: 'Platform reporting requires owner access.' });
+    const businessProfileId = req.query.businessProfileId ? Number(req.query.businessProfileId) : null;
+    const clientId = String(req.query.clientId || '');
+    const invoiceScope = platformScope ? '1 = 1' : accessibleScopeClause('i');
+    const invoiceScopeParameters = platformScope ? [] : accessibleScopeParameters(req.user);
+    const invoiceFilters = ['COALESCE(DATE(i.issue_date), DATE(i.created_at)) <= DATE(?)', "(i.status <> 'Draft' OR COALESCE(i.is_past, 0) = 1)"];
+    const invoiceParameters = [...invoiceScopeParameters, asOfDate];
+    if (businessProfileId) { invoiceFilters.push('i.business_profile_id = ?'); invoiceParameters.push(businessProfileId); }
+    if (clientId) { invoiceFilters.push('i.client_id = ?'); invoiceParameters.push(clientId); }
+    const invoices = await db.prepare(`
+        SELECT i.id, i.number, i.client_id, i.amount, i.currency, i.status, i.due_date, i.issue_date,
+               i.created_at, i.business_profile_id, c.name AS client_name, b.name AS business_name,
+               COALESCE(SUM(CASE WHEN DATE(p.date) <= DATE(?) THEN p.amount ELSE 0 END), 0) AS collected_to_date
+        FROM invoices i
+        LEFT JOIN clients c ON c.id = i.client_id
+        LEFT JOIN business_profile b ON b.id = i.business_profile_id
+        LEFT JOIN payments p ON p.invoice_id = i.id
+        WHERE ${invoiceScope} AND ${invoiceFilters.join(' AND ')}
+        GROUP BY i.id, i.number, i.client_id, i.amount, i.currency, i.status, i.due_date, i.issue_date,
+                 i.created_at, i.business_profile_id, c.name, b.name
+        ORDER BY COALESCE(DATE(i.issue_date), DATE(i.created_at)) DESC
+    `).all(asOfDate, ...invoiceParameters);
+    const paymentScope = platformScope ? '1 = 1' : accessibleScopeClause('p');
+    const paymentScopeParameters = platformScope ? [] : accessibleScopeParameters(req.user);
+    const paymentFilters = ['DATE(p.date) <= DATE(?)'];
+    const paymentParameters = [...paymentScopeParameters, asOfDate];
+    if (businessProfileId) { paymentFilters.push('i.business_profile_id = ?'); paymentParameters.push(businessProfileId); }
+    if (clientId) { paymentFilters.push('p.client_id = ?'); paymentParameters.push(clientId); }
+    const payments = await db.prepare(`
+        SELECT p.id, p.invoice_id, p.client_id, p.date, p.method, p.source, p.amount,
+               i.number AS invoice_number, i.currency, c.name AS client_name
+        FROM payments p JOIN invoices i ON i.id = p.invoice_id
+        LEFT JOIN clients c ON c.id = p.client_id
+        WHERE ${paymentScope} AND ${paymentFilters.join(' AND ')}
+        ORDER BY p.date DESC, p.id DESC
+    `).all(...paymentParameters);
+    const profiles = platformScope
+        ? await db.prepare('SELECT id, name FROM business_profile ORDER BY id').all()
+        : await getScopedBusinessProfiles(req.user);
+    const clients = platformScope
+        ? await db.prepare('SELECT id, name FROM clients ORDER BY name').all()
+        : await db.prepare(`SELECT id, name FROM clients WHERE ${accessibleScopeClause('', 'created_by_user_id')} ORDER BY name`).all(...accessibleScopeParameters(req.user));
+    const report = buildReceivablesReport({
+        invoices: invoices.map(invoice => ({ ...invoice, client_name: decryptValue(invoice.client_name || ''), business_name: decryptValue(invoice.business_name || '') })),
+        payments: payments.map(payment => ({ ...payment, client_name: decryptValue(payment.client_name || '') })),
+        asOfDate, fromDate, toDate,
+    });
+    const recurringScope = platformScope ? '1 = 1' : accessibleScopeClause('s');
+    const recurring = await db.prepare(`SELECT s.id, s.frequency, s.currency_code, s.next_run_at, s.end_at, s.status, p.amount, c.name AS client_name, s.description
+        FROM recurring_schedules s LEFT JOIN clients c ON c.id = s.client_id
+        LEFT JOIN schedule_price_history p ON p.schedule_id = s.id AND p.id = (SELECT id FROM schedule_price_history WHERE schedule_id = s.id ORDER BY effective_from DESC, id DESC LIMIT 1)
+        WHERE ${recurringScope} ORDER BY s.next_run_at`).all(...(platformScope ? [] : accessibleScopeParameters(req.user)));
+    const platform = platformScope ? {
+        users: Number((await db.prepare('SELECT COUNT(*) AS count FROM users').get()).count || 0),
+        organizations: Number((await db.prepare('SELECT COUNT(*) AS count FROM organizations').get()).count || 0),
+        businesses: Number((await db.prepare('SELECT COUNT(*) AS count FROM business_profile').get()).count || 0),
+    } : null;
+    res.json({
+        generatedAt: new Date().toISOString(), scope: platformScope ? 'platform' : 'account', filters: { asOfDate, fromDate, toDate, businessProfileId, clientId },
+        ...report,
+        recurring: recurring.map(schedule => ({ ...schedule, description: decryptValue(schedule.description || ''), client_name: decryptValue(schedule.client_name || '') })),
+        filterOptions: { profiles: profiles.map(profile => ({ id: profile.id, name: decryptValue(profile.name || '') || 'Unnamed business' })), clients: clients.map(client => ({ id: client.id, name: decryptValue(client.name || '') || 'Unnamed client' })) },
+        platform,
+        accountingFramework: { ledgerStatementsAvailable: false, message: 'No P&L, Balance Sheet, or Cash Flow until Kowope has ledger-grade accounting data.' },
+    });
+});
 app.get("/api/invoices", async (req, res) => res.json((await db
-    .prepare(req.user.organization_id
-    ? "SELECT i.*, c.name AS client_name, c.email AS client_email, c.address AS client_address FROM invoices i LEFT JOIN clients c ON c.id = i.client_id WHERE i.organization_id = ? ORDER BY i.created_at DESC"
-    : "SELECT i.*, c.name AS client_name, c.email AS client_email, c.address AS client_address FROM invoices i LEFT JOIN clients c ON c.id = i.client_id WHERE i.organization_id IS NULL AND i.user_id = ? ORDER BY i.created_at DESC")
-    .all(req.user.organization_id || req.user.id)).map(decryptInvoice)));
+    .prepare(`SELECT i.*, c.name AS client_name, c.email AS client_email, c.address AS client_address FROM invoices i LEFT JOIN clients c ON c.id = i.client_id WHERE ${accessibleScopeClause('i')} ORDER BY i.created_at DESC`)
+    .all(...accessibleScopeParameters(req.user))).map(decryptInvoice)));
 app.get('/api/invoices/:id', async (req, res) => {
-    const invoice = decryptInvoice(await db.prepare(req.user.organization_id ? 'SELECT i.*, c.name AS client_name, c.email AS client_email, c.address AS client_address FROM invoices i LEFT JOIN clients c ON c.id = i.client_id WHERE i.organization_id = ? AND (i.id = ? OR i.number = ?)' : 'SELECT i.*, c.name AS client_name, c.email AS client_email, c.address AS client_address FROM invoices i LEFT JOIN clients c ON c.id = i.client_id WHERE i.organization_id IS NULL AND i.user_id = ? AND (i.id = ? OR i.number = ?)').get(req.user.organization_id || req.user.id, req.params.id, req.params.id));
+    const invoice = decryptInvoice(await db.prepare(`SELECT i.*, c.name AS client_name, c.email AS client_email, c.address AS client_address FROM invoices i LEFT JOIN clients c ON c.id = i.client_id WHERE ${accessibleScopeClause('i')} AND i.id = ?`).get(...accessibleScopeParameters(req.user), req.params.id));
     if (!invoice)
         return res.status(404).json({ error: 'Invoice not found.' });
     invoice.lineItems = (await db.prepare('SELECT id, description, quantity, unit_price FROM line_items WHERE invoice_id = ? ORDER BY id').all(invoice.id)).map(item => ({ ...item, description: decryptValue(item.description) }));
@@ -1060,7 +1137,7 @@ app.post('/api/invoices', async (req, res) => {
     const {
         clientId, clientName, clientEmail, clientAddress = '',
         description, amount, dueDate, currency = 'USD',
-        paymentInstructions = '', lineItems = [], issueDate = null,
+        paymentInstructions = '', lineItems = [], issueDate = null, invoiceNumber = '',
         isPast = false, businessProfileId = null,
     } = req.body;
 
@@ -1096,9 +1173,16 @@ app.post('/api/invoices', async (req, res) => {
             }
             if (!client) throw new Error('Select a client or provide recipient name and email.');
 
-            // Ignore legacy req.body.number. All generated invoice identifiers
-            // follow their owning business profile, with no client-side override.
-            const number = await nextInvoiceNumber(db, profile, normalizeInvoiceDate(issueDate ?? new Date()));
+            const manualInvoiceNumber = String(invoiceNumber || '').trim();
+            if (manualInvoiceNumber.length > 200) throw new Error('Invoice number must be 200 characters or fewer.');
+            const number = manualInvoiceNumber || await nextInvoiceNumber(db, profile, normalizeInvoiceDate(issueDate ?? new Date()));
+            if (manualInvoiceNumber) {
+                const duplicate = await db.maybeOne(
+                    'SELECT id FROM invoices WHERE business_profile_id = ? AND number = ?',
+                    [profile.id, number],
+                );
+                if (duplicate) throw new Error(`Invoice number “${number}” already exists for this business.`);
+            }
             const invoiceId = crypto.randomUUID();
             await db.execute(
                 `INSERT INTO invoices (
@@ -1134,11 +1218,11 @@ app.post('/api/invoices', async (req, res) => {
     }
 });
 app.patch('/api/invoices/:id', async (req, res) => {
-    const invoice = await db.prepare('SELECT * FROM invoices WHERE organization_id = ? AND (id = ? OR number = ?)').get(req.user.organization_id, req.params.id, req.params.id);
+    const invoice = await db.prepare(`SELECT * FROM invoices WHERE ${accessibleScopeClause()} AND id = ?`).get(...accessibleScopeParameters(req.user), req.params.id);
     if (!invoice)
         return res.status(404).json({ error: 'Invoice not found.' });
     const { clientId, description, amount, dueDate, currency = 'USD', paymentInstructions = '', lineItems = [] } = req.body;
-    const client = clientId ? await db.prepare('SELECT * FROM clients WHERE id = ? AND organization_id = ?').get(clientId, req.user.organization_id) : null;
+    const client = clientId ? await db.prepare(`SELECT * FROM clients WHERE id = ? AND ${accessibleScopeClause('', 'created_by_user_id')}`).get(clientId, ...accessibleScopeParameters(req.user)) : null;
     if (!client || !description || !(Number(amount) > 0))
         return res.status(400).json({ error: 'Select a client and add at least one priced line item.' });
     const update = db.prepare('UPDATE invoices SET client_id = ?, client_name = ?, client_email = ?, description = ?, amount = ?, currency = ?, payment_instructions = ?, due_date = ? WHERE id = ?');
@@ -1152,38 +1236,41 @@ app.patch('/api/invoices/:id', async (req, res) => {
         }
     });
     await replaceItems();
-    res.json(decryptInvoice(await db.prepare('SELECT * FROM invoices WHERE id = ? AND organization_id = ?').get(invoice.id, req.user.organization_id)));
+    res.json(decryptInvoice(await db.prepare(`SELECT * FROM invoices WHERE id = ? AND ${accessibleScopeClause()}`).get(invoice.id, ...accessibleScopeParameters(req.user))));
 });
 app.patch('/api/invoices/:id/status', async (req, res) => {
     const { status } = req.body;
     if (!['Draft', 'Sent', 'Paid', 'Overdue'].includes(status))
         return res.status(400).json({ error: 'Invalid invoice status.' });
-    const invoice = await db.prepare('SELECT * FROM invoices WHERE organization_id = ? AND (id = ? OR number = ?)').get(req.user.organization_id, req.params.id, req.params.id);
+    const invoice = await db.prepare(`SELECT * FROM invoices WHERE ${accessibleScopeClause()} AND id = ?`).get(...accessibleScopeParameters(req.user), req.params.id);
     if (!invoice)
         return res.status(404).json({ error: 'Invoice not found.' });
     await db.prepare('UPDATE invoices SET status = ?, sent_at = CASE WHEN ? = \'Sent\' THEN CURRENT_TIMESTAMP ELSE sent_at END WHERE id = ?').run(status, status, invoice.id);
-    res.json(decryptInvoice(await db.prepare('SELECT * FROM invoices WHERE id = ? AND organization_id = ?').get(invoice.id, req.user.organization_id)));
+    res.json(decryptInvoice(await db.prepare(`SELECT * FROM invoices WHERE id = ? AND ${accessibleScopeClause()}`).get(invoice.id, ...accessibleScopeParameters(req.user))));
 });
 app.delete('/api/invoices/:id', async (req, res) => {
-    const invoice = await db.prepare('SELECT id FROM invoices WHERE organization_id = ? AND (id = ? OR number = ?)').get(req.user.organization_id, req.params.id, req.params.id);
+    const invoice = await db.prepare(`SELECT id FROM invoices WHERE ${accessibleScopeClause()} AND id = ?`).get(...accessibleScopeParameters(req.user), req.params.id);
     if (!invoice)
         return res.status(404).json({ error: 'Invoice not found.' });
-    await db.prepare('DELETE FROM invoices WHERE id = ? AND organization_id = ?').run(invoice.id, req.user.organization_id);
+    await db.prepare(`DELETE FROM invoices WHERE id = ? AND ${accessibleScopeClause()}`).run(invoice.id, ...accessibleScopeParameters(req.user));
     res.status(204).end();
 });
 app.post('/api/payments', async (req, res) => {
     const { invoiceId, method = 'Manual', date, amount } = req.body;
-    const invoice = await db.prepare('SELECT * FROM invoices WHERE (user_id = ? OR organization_id = ?) AND (id = ? OR number = ?)').get(req.user.id, req.user.organization_id, invoiceId, invoiceId);
+    const invoice = await db.prepare(`SELECT * FROM invoices WHERE ${accessibleScopeClause()} AND id = ?`).get(...accessibleScopeParameters(req.user), invoiceId);
     //console.log("Creating payment:", { invoice });
     if (!invoice)
         return res.status(404).json({ error: 'Invoice not found.' });
     if (!date || !(Number(amount) > 0))
         return res.status(400).json({ error: 'Payment date and amount are required.' });
-    const result = await db.prepare('INSERT INTO payments (invoice_id, client_id, date, source, method, amount, organization_id) VALUES (?, ?, ?, ?, ?, ?, ?)').run(invoice.id, invoice.client_id, date, 'Manual', method, Number(amount), req.user.organization_id);
-    await db.prepare("UPDATE invoices SET status = 'Paid' WHERE id = ?").run(invoice.id);
-    res.status(201).json(await db.prepare('SELECT * FROM payments WHERE id = ?').get(result.lastInsertRowid));
+    const result = await db.prepare('INSERT INTO payments (invoice_id, client_id, date, source, method, amount, organization_id, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(invoice.id, invoice.client_id, date, 'Manual', method, Number(amount), invoice.organization_id ?? null, invoice.user_id ?? null);
+    const paymentTotal = await db.prepare('SELECT COALESCE(SUM(amount), 0) AS amount FROM payments WHERE invoice_id = ?').get(invoice.id);
+    if (Number(paymentTotal.amount || 0) >= Number(invoice.amount || 0)) {
+        await db.prepare("UPDATE invoices SET status = 'Paid' WHERE id = ?").run(invoice.id);
+    }
+    res.status(201).json({ ...(await db.prepare('SELECT * FROM payments WHERE id = ?').get(result.lastInsertRowid)), paidAmount: Number(paymentTotal.amount || 0), outstandingAmount: Math.max(0, Number(invoice.amount || 0) - Number(paymentTotal.amount || 0)) });
 });
-app.get('/api/payments', async (req, res) => res.json(await db.prepare('SELECT p.*, i.number AS invoice_number FROM payments p LEFT JOIN invoices i ON i.id = p.invoice_id WHERE p.organization_id = ? ORDER BY p.id DESC').all(req.user.organization_id)));
+app.get('/api/payments', async (req, res) => res.json(await db.prepare(`SELECT p.*, i.number AS invoice_number FROM payments p LEFT JOIN invoices i ON i.id = p.invoice_id WHERE ${accessibleScopeClause('p')} ORDER BY p.id DESC`).all(...accessibleScopeParameters(req.user))));
 async function createPdf(invoice) {
     const business = invoice.business ? decryptFields(invoice.business, businessFields) : (await getBusinessProfile(invoice.organization_id, invoice.user_id, invoice.business_profile_id)) || {};
     const logoDataUrl = invoice.business?.logoDataUrl || invoice.business?.logo_data_url || business.logo_data_url || '';
@@ -1305,8 +1392,8 @@ async function createPdf(invoice) {
 }
 app.get("/api/invoices/:id/pdf", async (req, res) => {
     const invoice = decryptInvoice(await db
-        .prepare("SELECT i.*, c.address AS client_address FROM invoices i LEFT JOIN clients c ON c.id = i.client_id WHERE i.organization_id = ? AND (i.id = ? OR i.number = ?)")
-        .get(req.user.organization_id, req.params.id, req.params.id));
+        .prepare(`SELECT i.*, c.address AS client_address FROM invoices i LEFT JOIN clients c ON c.id = i.client_id WHERE ${accessibleScopeClause('i')} AND i.id = ?`)
+        .get(...accessibleScopeParameters(req.user), req.params.id));
     if (!invoice)
         return res.status(404).json({ error: "Invoice not found." });
     const pdf = await createPdf(invoice);
@@ -1324,8 +1411,8 @@ app.post('/api/invoices/preview/pdf', async (req, res) => {
 });
 app.post("/api/invoices/:id/send", async (req, res) => {
     const invoice = decryptInvoice(await db
-        .prepare("SELECT i.*, c.address AS client_address FROM invoices i LEFT JOIN clients c ON c.id = i.client_id WHERE i.organization_id = ? AND (i.id = ? OR i.number = ?)")
-        .get(req.user.organization_id, req.params.id, req.params.id));
+        .prepare(`SELECT i.*, c.address AS client_address FROM invoices i LEFT JOIN clients c ON c.id = i.client_id WHERE ${accessibleScopeClause('i')} AND i.id = ?`)
+        .get(...accessibleScopeParameters(req.user), req.params.id));
     if (!invoice)
         return res.status(404).json({ error: "Invoice not found." });
     const preferredProvider = (await getBusinessProfile(invoice.organization_id, invoice.user_id, invoice.business_profile_id))?.preferred_email_provider;

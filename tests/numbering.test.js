@@ -64,7 +64,7 @@ function makeDatabase({ invalidClient=false, identicalFormats=false, finiteSched
       if(sql.includes('FROM schedule_price_history'))return data.price.find(x=>x.schedule_id===params[0]&&x.effective_from<=params[1]);
       if(/FROM\s+clients\s+WHERE\s+id/.test(sql))return data.clients.find(x=>x.id===params[0]);
       if(sql.includes('INSERT INTO invoice_sequences')){const n=data.sequences.get(params[0])||1;data.sequences.set(params[0],n+1);return {allocated:n};}
-      if(/FROM\s+invoices\s+WHERE\s+number/.test(sql))return data.invoices.find(x=>x.number===params[0]);
+      if(/FROM\s+invoices\s+WHERE\s+business_profile_id\s*=\s*\?\s+AND\s+number/.test(sql))return data.invoices.find(invoice=>invoice.business_profile_id===params[0]&&invoice.number===params[1]);
       throw new Error('Unhandled maybeOne '+sql);
     },
     async execute(sql,params){
@@ -114,11 +114,20 @@ test('finite recurring schedules complete after their final selected occurrence'
   assert.equal(data.invoices.filter(invoice=>invoice.schedule_id===11).length,1);
 });
 
-test('same global prefix across businesses avoids duplicate invoice identifiers', async () => {
+test('the same formatted number is allowed for separate businesses', async () => {
   const {database,data}=makeDatabase({identicalFormats:true});
   const created=await runDueSchedules(database,'2026-11-10');
-  assert.deepEqual(created,['ABC/2026/001','ABC/2026/002']);
+  assert.deepEqual(created,['ABC/2026/001','ABC/2026/001']);
   assert.equal(data.invoices.length,2);
+});
+
+test('an occupied number advances only the issuing business sequence', async () => {
+  const {database,data}=makeDatabase();
+  data.invoices.push({id:'manual-1', business_profile_id:1, number:'ABC/2026/001'});
+  const nextNumber=await database.transaction(() => nextInvoiceNumber(database,data.businesses[0],'2026-11-10'))();
+  assert.equal(nextNumber,'ABC/2026/002');
+  const otherBusinessNumber=await database.transaction(() => nextInvoiceNumber(database,data.businesses[1],'2026-11-10'))();
+  assert.equal(otherBusinessNumber,'26-X-00001');
 });
 
 test('a failure rolls back invoices, counters, and schedule advancement', async () => {

@@ -58,25 +58,22 @@ export function InvoiceNumberingCard() {
       </div>
       {profiles.length === 0 ? <p className="mut">Save a business profile to configure its invoice numbering.</p> : <>
           <div className="settings-fields">
-            <label className="fl" htmlFor="numbering-business">Business</label>
-            <select id="numbering-business" value={index} onChange={changeBusiness}>
-              {profiles.map((item, profileIndex) => <option key={item.id} value={profileIndex}>{item.n || `Business ${item.id}`}</option>)}
-            </select>
-            <label className="fl" htmlFor="invoice-format">Format pattern</label>
-            <input id="invoice-format" value={draft.format} onChange={event => setDraft(current => ({
-          ...current,
-          format: event.target.value
-        }))} />
-            <label className="fl" htmlFor="invoice-prefix">Prefix value</label>
-            <input id="invoice-prefix" value={draft.prefix} onChange={event => setDraft(current => ({
-          ...current,
-          prefix: event.target.value
-        }))} />
-            <label className="fl" htmlFor="invoice-padding">Number padding</label>
-            <input id="invoice-padding" type="number" min="1" max="10" value={draft.padding} onChange={event => setDraft(current => ({
-          ...current,
-          padding: event.target.value
-        }))} />
+            <label className="fl" htmlFor="numbering-business">Business profile
+              <select id="numbering-business" value={index} onChange={changeBusiness}>
+                {profiles.map((item, profileIndex) => <option key={item.id} value={profileIndex}>{item.n || `Business ${item.id}`}</option>)}
+              </select>
+            </label>
+          </div>
+          <div className="settings-fields">
+            <label className="fl" htmlFor="invoice-format">Format pattern
+              <input id="invoice-format" value={draft.format} onChange={event => setDraft(current => ({...current,format: event.target.value}))} />
+            </label>
+            <label className="fl" htmlFor="invoice-prefix">Prefix value
+              <input id="invoice-prefix" value={draft.prefix} onChange={event => setDraft(current => ({...current,prefix: event.target.value}))} />
+            </label>
+            <label className="fl" htmlFor="invoice-padding">Number padding
+            <input id="invoice-padding" type="number" min="1" max="10" value={draft.padding} onChange={event => setDraft(current => ({...current,padding: event.target.value}))} />
+            </label>
           </div>
           <p className="settings-sub">Insert a format token:</p>
           <div className="chips">

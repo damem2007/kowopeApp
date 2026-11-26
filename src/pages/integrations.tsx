@@ -3,6 +3,7 @@ import { state } from '../modules/store.ts';
 import { providers } from '../modules/catalog.tsx';
 import { renderPill } from '../modules/format.tsx';
 import { hdr, renderProviderBadge } from '../ui/layout.tsx';
+import { disc, manageIntegration, savePreferredEmailProvider, wiz } from '../actions/integrations.ts';
 export function intRow(providerId: any, showDetails: any = false) {
   const integration = state.integrations[providerId] || {
       on: false,

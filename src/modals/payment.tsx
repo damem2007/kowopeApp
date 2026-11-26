@@ -1,11 +1,13 @@
 import React from 'react';
 import { state } from '../modules/store.ts';
 import { formatMoney } from '../modules/format.tsx';
+import { recPay } from '../actions/payments.ts';
+import { render } from '../ui/render.tsx';
 export const recordPaymentModal = () => 
   <div className="ov c">
     <div className="md"><h2>Record payment</h2><label className="fl">Invoice</label>
         <select id="pi">{state.invoices.filter(invoice => invoice.s !== "Paid").map(invoice => 
-          <option key={invoice.id} value={invoice.id}>{invoice.id} · {formatMoney(invoice.a)}</option>)}
+          <option key={invoice.id} value={invoice.id}>{invoice.number} · {formatMoney(invoice.a)}</option>)}
           </select>
           <label className="fl">Method</label>
           <select id="pm">

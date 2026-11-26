@@ -1,4 +1,4 @@
-# Kowope — React application with SQLite / hosted PostgreSQL adapters
+# Kowope — React + TypeScript application with SQLite / hosted PostgreSQL adapters
 
 This is a consolidated source tree based on the supplied `kowope.zip` and
 selected prior database changes. It uses **React components** for the frontend
@@ -37,11 +37,17 @@ node scripts/init-remote-postgres.js
 ```
 
 For an existing PostgreSQL database with baseline version 1 already applied,
-back it up and apply only the numbered migration:
+back it up and apply each missing numbered migration in order:
 
 ```bash
 node scripts/apply-remote-numbering-pg.js
+node scripts/apply-remote-recurring-duration-pg.js
+node scripts/apply-remote-payment-scope-pg.js
+node scripts/apply-remote-invoice-number-scope-pg.js
 ```
+
+The API verifies these PostgreSQL migration versions during startup and reports
+the exact missing script if the hosted schema is behind the application.
 
 Start the API and frontend in separate terminals:
 
@@ -55,18 +61,25 @@ The API requests use the Vite dev proxy. Run `npm run recurring` for the
 scheduled-invoice worker; production cron can invoke `/internal/cron/run` with
 `Authorization: Bearer $CRON_SECRET`.
 
-## Architectural and source consolidation
+## Architecture and ownership model
 
-- `src/main.jsx` initializes React; `src/ui/render.js` uses `createRoot`.
-- `src/pages`, `src/modals`, and `src/ui/layout.js` return React elements rather
-  than injecting HTML strings. Dedicated JSX components in `src/components`
+- `src/main.tsx` initializes React; `src/ui/render.tsx` owns one React root per
+  `#root` container and safely reuses it during Vite module re-evaluation.
+- `src/pages`, `src/modals`, and `src/ui/layout.tsx` return React elements rather
+  than injecting HTML strings. Dedicated TSX components in `src/components`
   implement the invoice editor, preview, and business-numbering settings.
-- `src/actions` still handles existing fetch requests and legacy app state so
-  feature behavior stays recognizable; a state-management rewrite was not part
-  of this compatibility change.
+- `src/actions` retains the established fetch and state behavior. Components
+  import action and rendering functions directly; there is no `window` action
+  bridge or `legacy-globals.d.ts` compatibility layer.
+- Personal records are scoped by `user_id` when `organization_id` is `NULL`.
+  Organization records are scoped through the active organization, while the
+  creating user ID remains available for audit purposes.
 - `server/services/invoice-numbering.js` is the **only backend formatter and
   allocator**. Manual invoice creation and `server/services/recurrence.js` call
   it using the selected business profile.
+- Invoice display numbers are unique within their issuing `business_profile_id`.
+  Internal invoice UUIDs—not display numbers—identify invoice actions,
+  payments, recurring sources, delivery, and downloads.
 - `server/db/index.js` is the **only database initializer** for API and worker;
   `sqlite-async-adapter.js` and `postgres-adapter.js` implement the same contract.
 - `server/db/migrations.js` remains the historical SQLite migration ledger;
@@ -74,13 +87,40 @@ scheduled-invoice worker; production cron can invoke `/internal/cron/run` with
 - `server/security/crypto.js` is unchanged. Always retain `VAULT_KEY` when
   transferring existing encrypted data.
 
+## Invoice numbering
+
+Each saved business profile has its own prefix, format, padding, sequence, and
+uniqueness scope. Multiple businesses may therefore use the same visible
+invoice number without colliding.
+
+When adding a past invoice, an entered invoice number is authoritative—for
+example, a number issued by an external system. It is rejected only if that
+same business profile already uses it. Leaving the field blank uses the
+selected business profile's configured automatic format and sequence.
+
+## Reporting
+
+The Reports page provides receivables, collections, aging, invoice and payment
+registers, and recurring-service forecasts. Report data can be scoped to the
+account/active organization, filtered by business profile or client, and—only
+for platform owners—viewed at platform scope.
+
+Amounts remain grouped by their transaction currency. Kowope intentionally does
+not combine currencies unless ledger-grade exchange-rate data is introduced.
+The UI retains a future accounting framework note: P&L, Balance Sheet, and Cash
+Flow reports are not available until Kowope has ledger-grade accounting data.
+
+## Theme support
+
+Settings uses the shared light/dark theme tokens for its page background, cards,
+forms, numbering controls, checkboxes, and business-logo controls. It no longer
+forces light colors when the application is in dark mode.
+
 ## Preservation and migration cautions
 
-**This is a source integration, not a verified production deployment.** No live
-PostgreSQL server, existing SQLite file, external email provider, or browser E2E
-suite was available for this run. Check the manual invoice, recurring invoice,
-client, payments, authentication, integration and backup workflows in staging
-before deploying. Do not overwrite the running application until smoke-tested.
+Database migrations are data-preserving, but a release should still be
+smoke-tested in staging. Check manual and recurring invoices, clients,
+payments, authentication, integrations, and backups before deployment.
 
 SQLite file backups remain implemented for SQLite through the unchanged backup
 service. Hosted PostgreSQL cannot be backed up with a SQLite ZIP snapshot;
@@ -89,18 +129,17 @@ endpoint explicitly reports unsupported rather than claiming success.
 
 Migration SQL only backfills `business_profile_id` for historical records when
 ownership is unambiguous. Records from multi-business organizations require a
-manual ownership review. Existing invoice identifiers are never rewritten.
-The old globally unique `invoices.number` constraint remains for compatibility,
-so different businesses choosing identical number formats can cause numbering
-gaps. This does not change the displayed business format.
+manual ownership review. Existing invoice display numbers are never rewritten.
+The invoice-number scope migration replaces the old global constraint with
+business-profile-scoped uniqueness while retaining a legacy safeguard for
+historical unassigned rows.
 
 ## Checks run
 
-- `node --test tests/*.test.js` — business-specific formats, transaction
-  rollback, encrypted invoice snapshots and cross-business collision handling.
-- TypeScript parser-based syntax checks across the React source files.
-- Static import/export audit of relative imports.
-- Mock React component-render smoke tests across fourteen UI route states.
+- `npm test` — access scoping, business-specific formats, invoice-number
+  allocation, recurring behavior, rollback, and currency-preserving reporting.
+- `npm run typecheck` — TypeScript validation across the React source.
+- `npm run build` — production Vite build.
 
-These are targeted checks, **not** substitutes for `npm run build`, tests using
-real React in a browser, or tests against a live PostgreSQL instance.
+These are targeted checks and do not replace browser end-to-end tests or a
+staging smoke test of external email providers.

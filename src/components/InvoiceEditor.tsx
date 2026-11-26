@@ -54,7 +54,7 @@ export function InvoiceEditor() {
       </div>
       <section className="card invoice-prototype-card">
         <div className="invoice-prototype-title">
-          <h2>Invoice <span className="mut">{invoice.invoiceId || 'Assigned when saved'}</span></h2>
+          <h2>Invoice <span className="mut">{invoice.invoiceNumber || 'Assigned when saved'}</span></h2>
           <div className="invoice-logo-wrap"><div className="invoice-logo-container">
             <label className="invoice-logo-upload" aria-label="Upload invoice logo">
               {logo ? <img src={logo} alt="Invoice logo" className="invoice-logo-preview" /> : <><span className="invoice-logo-icon" aria-hidden="true">⊞</span><span><b>Upload your logo</b><small>PNG, JPG or WEBP · max 512 KB</small></span></>}

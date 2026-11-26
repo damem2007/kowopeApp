@@ -54,6 +54,18 @@ export async function initializeDatabase(
       if (!recurringDuration) {
         throw new Error('PostgreSQL recurring duration migration missing. Run scripts/apply-remote-recurring-duration-pg.js.');
       }
+      const paymentScope = await database.maybeOne(
+        'SELECT version FROM postgres_schema_migrations WHERE version = ?', [4]
+      );
+      if (!paymentScope) {
+        throw new Error('PostgreSQL payment scope migration missing. Run scripts/apply-remote-payment-scope-pg.js.');
+      }
+      const invoiceNumberScope = await database.maybeOne(
+        'SELECT version FROM postgres_schema_migrations WHERE version = ?', [5]
+      );
+      if (!invoiceNumberScope) {
+        throw new Error('PostgreSQL invoice-number scope migration missing. Run scripts/apply-remote-invoice-number-scope-pg.js.');
+      }
       return database;
     } catch (error) {
       await database.close();

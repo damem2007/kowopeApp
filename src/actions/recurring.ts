@@ -32,7 +32,7 @@ export const runRec = async recurringIndex => {
       if (!scheduleResponse.ok) throw new Error(savedSchedule.error || 'Unable to update recurring schedule')
       if (savedSchedule.status === 'completed') recurringService.st = 'Completed'
     }
-    state.invoices.push({ id: savedInvoice.number, c: recurringService.c, a: Number(savedInvoice.amount), due: savedInvoice.due_date || '', s: savedInvoice.status || 'Draft', rec: 1, cur: savedInvoice.currency || 'USD', n: savedInvoice.payment_instructions || '' })
+    state.invoices.push({ id: savedInvoice.id, number: savedInvoice.number, c: recurringService.c, a: Number(savedInvoice.amount), due: savedInvoice.due_date || '', s: savedInvoice.status || 'Draft', rec: 1, cur: savedInvoice.currency || 'USD', n: savedInvoice.payment_instructions || '' })
     toast(savedInvoice.number + " created from schedule")
   } catch (error) { toast(error.message) }
 }
@@ -50,7 +50,7 @@ export const saveRec = async () => {
     const response = await fetch('/api/recurring', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ businessProfileId: sourceDetails.business_profile_id ?? sourceInvoice.businessProfileId ?? null, clientId: state.clientIds[sourceInvoice.c], description: sourceInvoice.d || sourceDetails.description || 'Recurring service', amount: +querySelector("#ma").value || sourceInvoice.a, frequency, nextRunAt: nextDate, currency: sourceInvoice.cur || state.defaultCurrency, autoSend: querySelector("#mau").checked ? 1 : 0, sourceInvoiceId: sourceDetails.id }) })
     const savedSchedule = await response.json()
     if (!response.ok) throw new Error(savedSchedule.error || 'Unable to create recurring schedule')
-    state.recurringServices.push({ businessProfileId: savedSchedule.business_profile_id ?? null, id: savedSchedule.id, c: sourceInvoice.c, a: Number(savedSchedule.amount || querySelector("#ma").value || sourceInvoice.a), d: sourceInvoice.d || 'Recurring service', f: frequency, next: nextDate, st: 'Active', auto: savedSchedule.auto_send, src: sourceInvoice.id })
+    state.recurringServices.push({ businessProfileId: savedSchedule.business_profile_id ?? null, id: savedSchedule.id, c: sourceInvoice.c, a: Number(savedSchedule.amount || querySelector("#ma").value || sourceInvoice.a), d: sourceInvoice.d || 'Recurring service', f: frequency, next: nextDate, st: 'Active', auto: savedSchedule.auto_send, sourceInvoiceId: sourceInvoice.id, src: sourceInvoice.number })
     sourceInvoice.rec = 1; state.activeModal = null
     toast("Recurring schedule created. Next invoice on " + formatDate(nextDate))
   } catch (error) { toast(error.message) }
@@ -144,10 +144,10 @@ export const svSave = async () => {
       const invoiceResponse = await fetch('/api/invoices', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ businessProfileId: serviceState.businessProfileId ?? state.numberingBusinessProfileId ?? state.businessProfiles[0]?.id ?? null, clientId, description: serviceState.d, amount: +serviceState.a, dueDate: issueDate, issueDate, isPast: true, currency: state.defaultCurrency, lineItems: [{ description: serviceState.d, quantity: 1, unitPrice: +serviceState.a }] }) })
       const savedInvoice = await invoiceResponse.json()
       if (!invoiceResponse.ok) throw new Error(savedInvoice.error || 'Unable to save historical invoice')
-      const paymentResponse = await fetch('/api/payments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ invoiceId: savedInvoice.number, method: 'Manual', date: issueDate, amount: +serviceState.a }) })
+      const paymentResponse = await fetch('/api/payments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ invoiceId: savedInvoice.id, method: 'Manual', date: issueDate, amount: +serviceState.a }) })
       const savedPayment = await paymentResponse.json()
       if (!paymentResponse.ok) throw new Error(savedPayment.error || 'Unable to save historical payment')
-      state.invoices.unshift({ id: savedInvoice.number, c: clientIndex, a: Number(savedInvoice.amount), iss: issueDate, due: issueDate, s: 'Paid', old: 1, d: serviceState.d, cur: savedInvoice.currency || state.defaultCurrency })
+      state.invoices.unshift({ id: savedInvoice.id, number: savedInvoice.number, c: clientIndex, a: Number(savedInvoice.amount), iss: issueDate, due: issueDate, s: 'Paid', old: 1, d: serviceState.d, cur: savedInvoice.currency || state.defaultCurrency })
       state.payments.push({ d: savedPayment.date, inv: savedInvoice.number, c: clientIndex, m: savedPayment.method || 'Manual', a: Number(savedPayment.amount) })
       historicalInvoiceIds.push(savedInvoice.id)
       lastInvoice = savedInvoice

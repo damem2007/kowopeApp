@@ -3,6 +3,7 @@ import { state } from '../modules/store.ts';
 import { formatDate } from '../modules/date.ts';
 import { formatMoney, renderPill } from '../modules/format.tsx';
 import { hdr } from '../ui/layout.tsx';
+import { render } from '../ui/render.tsx';
 export function payments() {
   return <>{hdr("Payments", "Every payment, matched to its invoice.", <button className="btn" onClick={event => {
       state.activeModal = 'pay';

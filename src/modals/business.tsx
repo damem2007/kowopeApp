@@ -1,5 +1,7 @@
 import React from 'react';
 import { state } from '../modules/store.ts';
+import { uploadBusinessLogo, saveBiz } from '../actions/settings.ts';
+import { render } from '../ui/render.tsx';
 export const businessModal = () => {
   const businessProfile = state.be >= 0 ? state.businessProfiles[state.be] : {
     n: "",

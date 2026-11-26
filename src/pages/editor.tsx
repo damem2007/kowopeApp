@@ -7,6 +7,7 @@ import { InvoiceEditor } from '../components/InvoiceEditor.tsx';
 export function sample() {
   return {
     invoiceId: null,
+    invoiceNumber: '',
     businessIndex: 0,
     paymentInstructions: '',
     clientIndex: '',

@@ -2,6 +2,9 @@ import React from 'react';
 import { state } from '../modules/store.ts';
 import { providers, icons } from '../modules/catalog.tsx';
 import { invoiceStatus } from '../modules/selectors.ts';
+import { logoutAccount } from '../actions/auth.ts';
+import { newInv } from '../actions/invoices.ts';
+import { go, render, toast } from './render.tsx';
 const navigation = [{
   route: 'overview',
   label: 'Overview',
@@ -18,6 +21,9 @@ const navigation = [{
   route: 'payments',
   label: 'Payments',
   primary: true
+}, {
+  route: 'reports',
+  label: 'Reports'
 }, {
   route: 'integrations',
   label: 'Integrations',
@@ -41,22 +47,22 @@ const navigationLink = (item, overdueCount) => <a key={item.route} className={st
 }} aria-current={state.currentRoute === item.route ? 'page' : 'false'}><svg viewBox="0 0 24 24">{icons[item.route]}</svg><span>{item.label}</span>{item.route === 'invoices' && overdueCount ? <span className="bd">{overdueCount}</span> : ''}</a>;
 export const toggleTheme = () => {
   document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
-  window.render?.();
+  render();
 };
 export const setTheme = theme => {
   document.documentElement.dataset.theme = theme;
-  window.render?.();
+  render();
 };
 const activeTheme = () => document.documentElement.dataset.theme || (window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
 export const toggleMobileMenu = () => {
   state.mobileMenuOpen = !state.mobileMenuOpen;
-  window.render();
-  if (state.mobileMenuOpen) requestAnimationFrame(() => document.querySelector('.mobile-drawer [data-drawer-focus]')?.focus());
+  render();
+  if (state.mobileMenuOpen) requestAnimationFrame(() => (document.querySelector('.mobile-drawer [data-drawer-focus]') as HTMLElement | null)?.focus());
 };
 export const closeMobileMenu = () => {
   if (state.mobileMenuOpen) {
     state.mobileMenuOpen = false;
-    window.render();
+    render();
   }
 };
 export const handleMobileMenuKeydown = event => {

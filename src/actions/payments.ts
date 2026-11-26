@@ -27,12 +27,12 @@ export const recPay = async () => {
     invoice.s = 'Paid';
     state.payments.push({ 
       d: payment.date, 
-      inv: value, 
+      inv: invoice.number,
       c: invoice.c, 
       m: payment.method, 
       a: payment.amount 
     }); 
     state.activeModal = null
-    toast("Payment recorded. " + value + " is paid")
+    toast("Payment recorded. " + invoice.number + " is paid")
   } catch (error) { toast(error.message) }
 }
