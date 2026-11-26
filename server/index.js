@@ -22,6 +22,7 @@ import { startBackupService } from './services/backup.js';
 import { runScheduledBackup, runManualBusinessBackup } from './services/backup.js';
 import { accessibleScopeClause, accessibleScopeParameters } from './services/access-scope.js';
 import { buildReceivablesReport } from './services/reporting.js';
+import { calculateInvoiceSnapshot } from './services/invoice-discounts.js';
 import { decryptFields, decryptValue, encryptValue, businessFields, invoiceFields, clientFields } from './security/crypto.js';
 dotenv.config();
 const app = express();
@@ -1138,14 +1139,20 @@ app.post('/api/invoices', async (req, res) => {
         clientId, clientName, clientEmail, clientAddress = '',
         description, amount, dueDate, currency = 'USD',
         paymentInstructions = '', lineItems = [], issueDate = null, invoiceNumber = '',
-        isPast = false, businessProfileId = null,
+        isPast = false, businessProfileId = null, discountValue = 0, discountType = '%',
+        taxName = 'Tax', taxRate = 0,
     } = req.body;
 
-    if (!description || !(Number(amount) > 0)) {
-        return res.status(400).json({ error: 'A description and positive invoice amount are required.' });
-    }
-
     try {
+        const snapshotLineItems = Array.isArray(lineItems) && lineItems.length
+            ? lineItems
+            : [{ quantity: 1, unitPrice: Number(amount) || 0 }];
+        const invoiceSnapshot = calculateInvoiceSnapshot({
+            lineItems: snapshotLineItems, discountValue, discountType, taxName, taxRate,
+        });
+        if (!description || !(invoiceSnapshot.amount > 0)) {
+            throw new Error('A description and positive invoice amount are required.');
+        }
         const invoice = await db.transaction(async () => {
             // A selected business is mandatory when several are accessible.
             const profile = await resolveInvoiceBusiness(db, {
@@ -1189,13 +1196,17 @@ app.post('/api/invoices', async (req, res) => {
                     id, number, client_id, client_name, client_email,
                     description, amount, currency, payment_instructions,
                     due_date, issue_date, is_past, organization_id, user_id,
-                    business_profile_id
-                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    business_profile_id, subtotal_amount, discount_value,
+                    discount_type, discount_amount, tax_name, tax_rate, tax_amount
+                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                 [invoiceId, number, client.id, client.name, client.email,
-                 encryptValue(description), Number(amount), currency,
+                 encryptValue(description), invoiceSnapshot.amount, currency,
                  encryptValue(paymentInstructions), dueDate || null,
                  issueDate || null, isPast ? 1 : 0,
-                 req.user.organization_id ?? null, req.user.id, profile.id],
+                 req.user.organization_id ?? null, req.user.id, profile.id,
+                 invoiceSnapshot.subtotalAmount, invoiceSnapshot.discountValue,
+                 invoiceSnapshot.discountType, invoiceSnapshot.discountAmount,
+                 invoiceSnapshot.taxName, invoiceSnapshot.taxRate, invoiceSnapshot.taxAmount],
             );
             for (const item of Array.isArray(lineItems) ? lineItems : []) {
                 if (item.description || Number(item.unitPrice) > 0) {
@@ -1213,7 +1224,7 @@ app.post('/api/invoices', async (req, res) => {
         res.status(201).json(decryptInvoice(invoice));
     } catch (error) {
         console.error('Invoice creation failed:', error);
-        const knownIssue = /business|client|invoice|profile|number|format|date|duplicate|unique/i.test(error.message);
+        const knownIssue = /business|client|invoice|profile|number|format|date|duplicate|unique|discount|tax|positive/i.test(error.message);
         res.status(knownIssue ? 400 : 500).json({ error: knownIssue ? error.message : 'Unable to create invoice.' });
     }
 });
@@ -1221,13 +1232,29 @@ app.patch('/api/invoices/:id', async (req, res) => {
     const invoice = await db.prepare(`SELECT * FROM invoices WHERE ${accessibleScopeClause()} AND id = ?`).get(...accessibleScopeParameters(req.user), req.params.id);
     if (!invoice)
         return res.status(404).json({ error: 'Invoice not found.' });
-    const { clientId, description, amount, dueDate, currency = 'USD', paymentInstructions = '', lineItems = [] } = req.body;
+    const { clientId, description, amount, dueDate, currency = 'USD', paymentInstructions = '', lineItems = [], discountValue, discountType, taxName, taxRate } = req.body;
     const client = clientId ? await db.prepare(`SELECT * FROM clients WHERE id = ? AND ${accessibleScopeClause('', 'created_by_user_id')}`).get(clientId, ...accessibleScopeParameters(req.user)) : null;
-    if (!client || !description || !(Number(amount) > 0))
+    if (!client || !description)
         return res.status(400).json({ error: 'Select a client and add at least one priced line item.' });
-    const update = db.prepare('UPDATE invoices SET client_id = ?, client_name = ?, client_email = ?, description = ?, amount = ?, currency = ?, payment_instructions = ?, due_date = ? WHERE id = ?');
+    let invoiceSnapshot;
+    try {
+        const snapshotLineItems = Array.isArray(lineItems) && lineItems.length
+            ? lineItems
+            : [{ quantity: 1, unitPrice: Number(amount) || 0 }];
+        invoiceSnapshot = calculateInvoiceSnapshot({
+            lineItems: snapshotLineItems,
+            discountValue: discountValue ?? invoice.discount_value,
+            discountType: discountType ?? invoice.discount_type,
+            taxName: taxName ?? invoice.tax_name,
+            taxRate: taxRate ?? invoice.tax_rate,
+        });
+        if (!(invoiceSnapshot.amount > 0)) throw new Error('A positive invoice amount is required.');
+    } catch (error) {
+        return res.status(400).json({ error: error.message });
+    }
+    const update = db.prepare('UPDATE invoices SET client_id = ?, client_name = ?, client_email = ?, description = ?, amount = ?, currency = ?, payment_instructions = ?, due_date = ?, subtotal_amount = ?, discount_value = ?, discount_type = ?, discount_amount = ?, tax_name = ?, tax_rate = ?, tax_amount = ? WHERE id = ?');
     const replaceItems = db.transaction(async () => {
-        await update.run(client.id, encryptValue(client.name), encryptValue(client.email), encryptValue(description), Number(amount), currency, encryptValue(paymentInstructions), dueDate || null, invoice.id);
+        await update.run(client.id, encryptValue(client.name), encryptValue(client.email), encryptValue(description), invoiceSnapshot.amount, currency, encryptValue(paymentInstructions), dueDate || null, invoiceSnapshot.subtotalAmount, invoiceSnapshot.discountValue, invoiceSnapshot.discountType, invoiceSnapshot.discountAmount, invoiceSnapshot.taxName, invoiceSnapshot.taxRate, invoiceSnapshot.taxAmount, invoice.id);
         await db.prepare('DELETE FROM line_items WHERE invoice_id = ?').run(invoice.id);
         const insertLineItem = db.prepare('INSERT INTO line_items (invoice_id, description, quantity, unit_price) VALUES (?, ?, ?, ?)');
         for (const item of Array.isArray(lineItems) ? lineItems : []) {
@@ -1281,9 +1308,12 @@ async function createPdf(invoice) {
         doc.on('error', reject);
         const items = lineItems.length ? lineItems : [{ description: invoice.description || 'Line item', quantity: 1, unitPrice: Number(invoice.amount) || 0 }];
         const lineItemSubtotal = items.reduce((sum, item) => sum + Number(item.quantity || 1) * Number(item.unitPrice || 0), 0);
-        const subtotal = Number.isFinite(Number(invoice.subtotal)) ? Number(invoice.subtotal) : lineItemSubtotal;
-        const discount = Number.isFinite(Number(invoice.discount)) ? Number(invoice.discount) : 0;
-        const taxAmount = Number.isFinite(Number(invoice.taxAmount)) ? Number(invoice.taxAmount) : 0;
+        const subtotal = Number.isFinite(Number(invoice.subtotal_amount)) ? Number(invoice.subtotal_amount)
+            : Number.isFinite(Number(invoice.subtotal)) ? Number(invoice.subtotal) : lineItemSubtotal;
+        const discount = Number.isFinite(Number(invoice.discount_amount)) ? Number(invoice.discount_amount)
+            : Number.isFinite(Number(invoice.discount)) ? Number(invoice.discount) : 0;
+        const taxAmount = Number.isFinite(Number(invoice.tax_amount)) ? Number(invoice.tax_amount)
+            : Number.isFinite(Number(invoice.taxAmount)) ? Number(invoice.taxAmount) : 0;
         const total = Number.isFinite(Number(invoice.amount)) ? Number(invoice.amount) : subtotal - discount + taxAmount;
         const currencySymbols = { USD: '$', CAD: 'CA$', EUR: '€', GBP: '£', NGN: '₦' };
         const currencyCode = String(invoice.currency || 'USD').toUpperCase();
@@ -1369,7 +1399,7 @@ async function createPdf(invoice) {
         const totalRows = [
             ['Subtotal', money(subtotal)],
             ['Discount', `-${money(discount)}`],
-            [`${invoice.taxName || 'Tax'} ${Number(invoice.taxRate || 0)}%`, money(taxAmount)],
+            [`${invoice.tax_name || invoice.taxName || 'Tax'} ${Number(invoice.tax_rate ?? invoice.taxRate ?? 0)}%`, money(taxAmount)],
         ];
         totalRows.forEach(([label, value]) => {
             doc.font('Times-Roman').fontSize(11).fillColor(ink).text(label, totalsLeft, y, { width: 90 });
@@ -1379,14 +1409,28 @@ async function createPdf(invoice) {
         doc.moveTo(totalsLeft, y).lineTo(right, y).lineWidth(1).strokeColor(ink).stroke();
         y += 12;
         doc.font('Times-Bold').fontSize(15).fillColor(ink).text('Total due', totalsLeft, y).text(money(total), totalsLeft + 90, y, { width: 95, align: 'right' });
-        y += 56;
+        // Keep enough room for the payment terms and footer on ordinary
+        // invoices. The former 56-point gap pushed the footer beyond the
+        // printable area even when the first page had usable space left.
+        y += 16;
         doc.font('Times-Bold').fontSize(11).fillColor(ink).text('Payment terms and instructions', left, y);
         const terms = `Payment is due on ${date(invoice.due_date)}.${invoice.payment_instructions ? `\n${invoice.payment_instructions}` : ''}`;
-        doc.font('Times-Roman').fontSize(10).fillColor(muted).text(terms, left, y + 20, { width });
-        const footerY = Math.max(y + 20 + doc.heightOfString(terms, { width }) + 26, 690);
+        const termsY = y + 20;
+        doc.font('Times-Roman').fontSize(10).fillColor(muted).text(terms, left, termsY, { width });
+        const footerHeight = 46;
+        const footerBottomMargin = 12;
+        const maximumFooterY = doc.page.height - footerBottomMargin - footerHeight;
+        let footerY = Math.max(termsY + doc.heightOfString(terms, { width }) + 14, 690);
+        // Keep the two footer lines together. Long invoices may legitimately
+        // need one additional final page, but a footer can never create two.
+        if (footerY > maximumFooterY) {
+            doc.addPage();
+            footerY = doc.page.margins.top;
+        }
+        doc.page.margins.bottom = footerBottomMargin;
         doc.moveTo(left, footerY).lineTo(right, footerY).lineWidth(.5).strokeColor(rule).stroke();
         doc.font('Times-Italic').fontSize(10).fillColor(muted).text('Thank you for your business.', left, footerY + 14, { width, align: 'center' });
-        doc.font('Times-Roman').text(`${business.name || 'Your business'}${business.email ? ` · ${business.email}` : ''}`, left, footerY + 30, { width, align: 'center' });
+        doc.font('Times-Roman').text(`${business.name || 'Your business'}${business.email ? ` · ${business.email}` : ''}`, left, footerY + 28, { width, align: 'center' });
         doc.end();
     });
 }

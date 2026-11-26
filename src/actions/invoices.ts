@@ -46,6 +46,10 @@ export const editDraft = async id => {
     editor.duePreset = 0
     editor.currency = invoice.currency || state.defaultCurrency
     editor.paymentInstructions = invoice.payment_instructions || ''
+    editor.discountValue = Number(invoice.discount_value) || 0
+    editor.discountType = invoice.discount_type === '$' ? '$' : '%'
+    editor.taxName = invoice.tax_name || 'Tax'
+    editor.tax = Number(invoice.tax_rate) || 0
     editor.lineItems = Array.isArray(invoice.lineItems) && invoice.lineItems.length
       ? invoice.lineItems.map(item => ({ description: item.description || '', quantity: Number(item.quantity) || 1, unitPrice: Number(item.unit_price) || 0 }))
       : [{ description: invoice.description || '', quantity: 1, unitPrice: Number(invoice.amount) || 0 }]
@@ -95,6 +99,10 @@ export const dup = async id => {
       currency: sourceDetails.currency || 'USD',
       paymentInstructions: sourceDetails.payment_instructions || '',
       businessProfileId: sourceDetails.business_profile_id || null,
+      discountValue: Number(sourceDetails.discount_value) || 0,
+      discountType: sourceDetails.discount_type === '$' ? '$' : '%',
+      taxName: sourceDetails.tax_name || 'Tax',
+      taxRate: Number(sourceDetails.tax_rate) || 0,
       lineItems,
     }
     const duplicateResponse = await fetch('/api/invoices', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(duplicatePayload) })
@@ -162,10 +170,11 @@ export async function save(mode) {
   if (!editor.lineItems.some(item => Number(item.unitPrice) > 0)) errors.push('Add at least one line item with a price.')
   editor.errors = errors
   if (errors.length) return toast(errors.join(' '))
-  const totalAmount = calc().total
+  const totals = calc()
+  const totalAmount = totals.total
   const businessProfile = state.businessProfiles[editor.businessIndex] || {}
   const invoiceLogo = editor.logoDataUrl || (!editor.logoRemoved ? businessProfile.logoDataUrl || '' : '')
-  const payload = { clientId: state.clientIds?.[Number(editor.clientIndex)], description: editor.lineItems.filter(item => item.description || item.unitPrice > 0).map(item => item.description || 'Line item').join(', '), lineItems: editor.lineItems.filter(item => item.description || item.unitPrice > 0).map(item => ({ description: item.description, quantity: item.quantity, unitPrice: item.unitPrice })), amount: totalAmount, dueDate: editor.dueDate || null, currency: editor.currency, paymentInstructions: editor.paymentInstructions, businessProfileId: businessProfile.id ?? null }
+  const payload = { clientId: state.clientIds?.[Number(editor.clientIndex)], description: editor.lineItems.filter(item => item.description || item.unitPrice > 0).map(item => item.description || 'Line item').join(', '), lineItems: editor.lineItems.filter(item => item.description || item.unitPrice > 0).map(item => ({ description: item.description, quantity: item.quantity, unitPrice: item.unitPrice })), amount: totalAmount, dueDate: editor.dueDate || null, currency: editor.currency, paymentInstructions: editor.paymentInstructions, businessProfileId: businessProfile.id ?? null, discountValue: editor.discountValue, discountType: editor.discountType, taxName: editor.taxName, taxRate: editor.tax }
   const response = await fetch(editor.invoiceId ? `/api/invoices/${encodeURIComponent(editor.invoiceId)}` : '/api/invoices', { method: editor.invoiceId ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
   const invoice = await response.json()
   if (!response.ok) { editor.err = [invoice.error || 'Unable to save invoice.']; return toast(editor.err[0]) }
@@ -179,7 +188,7 @@ export async function save(mode) {
   if (saved) Object.assign(saved, summary);
   else state.invoices.push(summary);
   if (mode === 'pdf') {
-    const pdf = await fetch('/api/invoices/preview/pdf', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ number: invoice.number, clientName: state.clientNames[editor.clientIndex], clientEmail: state.clientDetails[editor.clientIndex]?.e || '', clientAddress: state.clientDetails[editor.clientIndex]?.a || '', description: payload.description, lineItems: payload.lineItems, amount: totalAmount, subtotal: calc().subtotal, discount: calc().discount, taxAmount: calc().taxAmount, taxName: editor.taxName, taxRate: editor.tax, currency: editor.currency, currencySymbol: currencySigns[editor.currency], dueDate: editor.dueDate, paymentInstructions: editor.paymentInstructions, business: { name:businessProfile.n, address:businessProfile.a, email:businessProfile.e, phone:businessProfile.p, logoDataUrl: invoiceLogo } }) })
+    const pdf = await fetch('/api/invoices/preview/pdf', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ number: invoice.number, clientName: state.clientNames[editor.clientIndex], clientEmail: state.clientDetails[editor.clientIndex]?.e || '', clientAddress: state.clientDetails[editor.clientIndex]?.a || '', description: payload.description, lineItems: payload.lineItems, amount: totalAmount, subtotal: totals.subtotal, discount: totals.discount, taxAmount: totals.taxAmount, taxName: editor.taxName, taxRate: editor.tax, currency: editor.currency, currencySymbol: currencySigns[editor.currency], dueDate: editor.dueDate, paymentInstructions: editor.paymentInstructions, business: { name:businessProfile.n, address:businessProfile.a, email:businessProfile.e, phone:businessProfile.p, logoDataUrl: invoiceLogo } }) })
     if (!pdf.ok) return toast('Invoice saved, but the PDF could not be generated.')
     saveBlob(await pdf.blob(), `${invoice.number}.pdf`)
   }

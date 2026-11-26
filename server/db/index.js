@@ -66,6 +66,18 @@ export async function initializeDatabase(
       if (!invoiceNumberScope) {
         throw new Error('PostgreSQL invoice-number scope migration missing. Run scripts/apply-remote-invoice-number-scope-pg.js.');
       }
+      const invoiceDiscount = await database.maybeOne(
+        'SELECT version FROM postgres_schema_migrations WHERE version = ?', [6]
+      );
+      if (!invoiceDiscount) {
+        throw new Error('PostgreSQL invoice discount migration missing. Run scripts/apply-remote-invoice-discount-pg.js.');
+      }
+      const invoiceFinancialSnapshot = await database.maybeOne(
+        'SELECT version FROM postgres_schema_migrations WHERE version = ?', [7]
+      );
+      if (!invoiceFinancialSnapshot) {
+        throw new Error('PostgreSQL invoice financial snapshot migration missing. Run scripts/apply-remote-invoice-financial-snapshot-pg.js.');
+      }
       return database;
     } catch (error) {
       await database.close();

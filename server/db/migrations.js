@@ -762,6 +762,60 @@ const migrations = [
       `)
     },
   },
+  {
+    version: 38,
+    description: 'Persist invoice discount value and type',
+    apply(db) {
+      const columns = db.prepare('PRAGMA table_info(invoices)').all()
+      if (!columns.some(column => column.name === 'discount_value')) {
+        db.exec('ALTER TABLE invoices ADD COLUMN discount_value REAL NOT NULL DEFAULT 0')
+      }
+      if (!columns.some(column => column.name === 'discount_type')) {
+        db.exec("ALTER TABLE invoices ADD COLUMN discount_type TEXT NOT NULL DEFAULT '%'")
+      }
+    },
+  },
+  {
+    version: 39,
+    description: 'Persist invoice financial snapshots and backfill known discounts',
+    apply(db) {
+      const columns = db.prepare('PRAGMA table_info(invoices)').all()
+      const addColumnIfMissing = (name, definition) => {
+        if (!columns.some(column => column.name === name)) db.exec(`ALTER TABLE invoices ADD COLUMN ${name} ${definition}`)
+      }
+      addColumnIfMissing('subtotal_amount', 'REAL')
+      addColumnIfMissing('discount_amount', 'REAL')
+      addColumnIfMissing('tax_name', 'TEXT')
+      addColumnIfMissing('tax_rate', 'REAL')
+      addColumnIfMissing('tax_amount', 'REAL')
+      db.exec(`
+        UPDATE invoices
+        SET subtotal_amount = COALESCE((SELECT SUM(quantity * unit_price) FROM line_items WHERE line_items.invoice_id = invoices.id), amount),
+            discount_amount = CASE
+              WHEN COALESCE(discount_value, 0) > 0 THEN MIN(
+                COALESCE((SELECT SUM(quantity * unit_price) FROM line_items WHERE line_items.invoice_id = invoices.id), amount),
+                CASE WHEN discount_type = '%' THEN COALESCE((SELECT SUM(quantity * unit_price) FROM line_items WHERE line_items.invoice_id = invoices.id), amount) * discount_value / 100 ELSE discount_value END
+              )
+              WHEN amount < COALESCE((SELECT SUM(quantity * unit_price) FROM line_items WHERE line_items.invoice_id = invoices.id), amount) THEN COALESCE((SELECT SUM(quantity * unit_price) FROM line_items WHERE line_items.invoice_id = invoices.id), amount) - amount
+              ELSE 0
+            END,
+            discount_value = CASE
+              WHEN COALESCE(discount_value, 0) > 0 THEN discount_value
+              WHEN amount < COALESCE((SELECT SUM(quantity * unit_price) FROM line_items WHERE line_items.invoice_id = invoices.id), amount) THEN COALESCE((SELECT SUM(quantity * unit_price) FROM line_items WHERE line_items.invoice_id = invoices.id), amount) - amount
+              ELSE 0
+            END,
+            discount_type = CASE
+              WHEN COALESCE(discount_value, 0) > 0 THEN discount_type
+              WHEN amount < COALESCE((SELECT SUM(quantity * unit_price) FROM line_items WHERE line_items.invoice_id = invoices.id), amount) THEN '$'
+              ELSE '%'
+            END,
+            tax_name = COALESCE(NULLIF(tax_name, ''), 'Tax'),
+            tax_rate = COALESCE(tax_rate, 0),
+            tax_amount = COALESCE(tax_amount, 0)
+        WHERE subtotal_amount IS NULL
+      `)
+    },
+  },
 
 ]
 

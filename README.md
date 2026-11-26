@@ -44,6 +44,8 @@ node scripts/apply-remote-numbering-pg.js
 node scripts/apply-remote-recurring-duration-pg.js
 node scripts/apply-remote-payment-scope-pg.js
 node scripts/apply-remote-invoice-number-scope-pg.js
+node scripts/apply-remote-invoice-discount-pg.js
+node scripts/apply-remote-invoice-financial-snapshot-pg.js
 ```
 
 The API verifies these PostgreSQL migration versions during startup and reports
@@ -80,6 +82,9 @@ scheduled-invoice worker; production cron can invoke `/internal/cron/run` with
 - Invoice display numbers are unique within their issuing `business_profile_id`.
   Internal invoice UUIDs—not display numbers—identify invoice actions,
   payments, recurring sources, delivery, and downloads.
+- Saved invoices retain an immutable financial snapshot: subtotal, entered
+  discount value/type, applied discount amount, tax breakdown, and final total.
+  Downloaded and emailed PDFs read these stored values without recalculating.
 - `server/db/index.js` is the **only database initializer** for API and worker;
   `sqlite-async-adapter.js` and `postgres-adapter.js` implement the same contract.
 - `server/db/migrations.js` remains the historical SQLite migration ledger;

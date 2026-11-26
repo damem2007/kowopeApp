@@ -18,7 +18,9 @@ which receives `legacyBackupDatabase` only on the SQLite runtime.
 2. Run `node scripts/init-remote-postgres.js` to initialize baseline and
    per-business invoice numbering. This refuses an existing application schema.
 3. For an **existing** Kowope PostgreSQL database already initialized to
-   baseline v1, use `node scripts/apply-remote-numbering-pg.js` after a backup.
+   baseline v1, use the numbered scripts in order after a backup, including
+   `node scripts/apply-remote-invoice-discount-pg.js` for version 6 and
+   `node scripts/apply-remote-invoice-financial-snapshot-pg.js` for version 7.
 4. Set `DATABASE_CLIENT=postgres`. No local PostgreSQL service is necessary.
 
 ## Existing SQLite

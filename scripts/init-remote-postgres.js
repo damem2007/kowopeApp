@@ -12,7 +12,14 @@ if (!connectionString) throw new Error('DATABASE_URL is required.');
 const pool = new pg.Pool({ connectionString, max: 1, connectionTimeoutMillis: 10_000 });
 
 const baselineFile = new URL('../server/db/postgres-schema.sql', import.meta.url);
-const numberingFile = new URL('../server/db/034-business-numbering.postgres.sql', import.meta.url);
+const migrationFiles = [
+  '../server/db/034-business-numbering.postgres.sql',
+  '../server/db/035-recurring-duration.postgres.sql',
+  '../server/db/036-payment-scope.postgres.sql',
+  '../server/db/037-invoice-number-scope.postgres.sql',
+  '../server/db/038-invoice-discount.postgres.sql',
+  '../server/db/039-invoice-financial-snapshot.postgres.sql',
+].map(file => new URL(file, import.meta.url));
 
 let client;
 try {
@@ -30,10 +37,12 @@ try {
     throw new Error(`Target database is not empty (${result.rows.map(row => row.tablename).join(', ')}). Do not initialize an existing database.`);
   }
 
-  // Each file owns its own transaction, so neither can leave a partial version.
+  // Each file owns its own transaction, so no individual version can leave a partial migration.
   await client.query(await readFile(baselineFile, 'utf8'));
-  await client.query(await readFile(numberingFile, 'utf8'));
-  console.log('Remote PostgreSQL baseline and business numbering migration initialized.');
+  for (const migrationFile of migrationFiles) {
+    await client.query(await readFile(migrationFile, 'utf8'));
+  }
+  console.log('Remote PostgreSQL baseline and application migrations initialized.');
 } catch (error) {
   console.error('Remote PostgreSQL initialization failed:', error.message);
   process.exitCode = 1;
