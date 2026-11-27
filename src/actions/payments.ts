@@ -26,6 +26,7 @@ export const recPay = async () => {
     if (!response.ok) throw new Error(payment.error || 'Unable to record payment')
     invoice.s = 'Paid';
     state.payments.push({ 
+      invoiceId: payment.invoice_id || value,
       d: payment.date, 
       inv: invoice.number,
       c: invoice.c, 

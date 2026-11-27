@@ -6,7 +6,8 @@ import { formatMoney, renderPill } from '../modules/format.tsx';
 import { invoiceStatus, sum } from '../modules/selectors.ts';
 import { hdr } from '../ui/layout.tsx';
 import { intRow } from './integrations.tsx';
-import { send } from '../actions/invoices.ts';
+import { openInvoice, send } from '../actions/invoices.ts';
+import { viewClient } from '../actions/clients.ts';
 import { go } from '../ui/render.tsx';
 const escapeHtml = value => String(value ?? ''); // React escapes rendered text and attributes automatically.
 
@@ -49,14 +50,14 @@ export function overview() {
             "borderColor": "var(--bad)"
           }}><h2>Needs attention</h2>{bad.map(invoice => <div key={invoice.id} className="row b" style={{
               "marginTop": "12px"
-            }}><span><b>{invoice.number}</b> · {state.clientNames[invoice.c].split(" (")[0]} is overdue since {formatDate(invoice.due)}</span><button className="btn sm" onClick={event => {
+            }}><span><button className="btn s sm" onClick={() => openInvoice(String(invoice.id))}>{invoice.number}</button> · <button className="btn s sm" onClick={() => viewClient(state.clientIds[invoice.c])}>{state.clientNames[invoice.c].split(" (")[0]}</button> is overdue since {formatDate(invoice.due)}</span><button className="btn sm" onClick={event => {
                 send(String(invoice.id));
               }}>Send reminder</button></div>)}</div> : ""}
 <div className="card"><div className="row b"><h2>Recent invoices</h2><a className="mut" style={{
                 "cursor": "pointer"
               }} onClick={event => {
                 go('invoices');
-              }}>View all</a></div><div className="tbw"><table><tbody>{state.invoices.slice(-5).reverse().map(invoice => <tr key={invoice.id}><td><b>{invoice.number}</b> {invoice.rec ? renderPill("Recurring") : ""}<br /><span className="mut">{state.clientNames[invoice.c].split(" (")[0]}</span></td><td>{renderPill(invoiceStatus(invoice))}</td><td className="r">{formatMoney(invoice.a)}</td></tr>)}</tbody></table></div></div></div>
+              }}>View all</a></div><div className="tbw"><table><tbody>{state.invoices.slice(0, 5).map(invoice => <tr key={invoice.id}><td><button className="btn s sm" onClick={() => openInvoice(String(invoice.id))}>{invoice.number}</button> {invoice.rec ? renderPill("Recurring") : ""}<br /><button className="btn s sm mut" onClick={() => viewClient(state.clientIds[invoice.c])}>{state.clientNames[invoice.c].split(" (")[0]}</button></td><td>{renderPill(invoiceStatus(invoice))}</td><td className="r">{formatMoney(invoice.a)}</td></tr>)}</tbody></table></div></div></div>
 <div className="grid"><div className="card"><h2>Upcoming recurring</h2>{state.recurringServices.filter(recurringService => recurringService.st === "Active").map((recurringService, recurringIndex) => <div key={recurringService.id || recurringIndex} className="row b" style={{
               "marginTop": "12px"
             }}><span>{state.clientNames[recurringService.c].split(" (")[0]}<br /><span className="mut">{recurringService.f} · {formatDate(recurringService.next)}</span></span><b>{formatMoney(recurringService.a)}</b></div>) || <p className="mut">Nothing scheduled. Turn on Repeat when you create an invoice.</p>}</div>

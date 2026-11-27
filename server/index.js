@@ -76,6 +76,15 @@ const getScopedBusinessProfiles = async (user) => {
 const getIntegrationConfig = integration => integration ? { ...integration, config_json: decryptValue(integration.config_json || '{}') } : integration;
 const decryptInvoice = invoice => decryptFields(invoice, invoiceFields);
 const decryptClient = client => decryptFields(client, clientFields);
+const invoicePdfFilename = (businessName, invoiceNumber) => {
+    const filenameSegment = (value, fallback) => String(value || fallback)
+        .normalize('NFKD')
+        .replace(/[^\x20-\x7E]/g, '')
+        .replace(/[\\/:*?"<>|]+/g, '-')
+        .replace(/\s+/g, ' ')
+        .trim() || fallback;
+    return `${filenameSegment(businessName, 'Invoice')}-${filenameSegment(invoiceNumber, 'invoice')}.pdf`;
+};
 const oauthStates = new Map();
 const sessions = new Map();
 const passwordResetTokens = new Map();
@@ -982,7 +991,7 @@ app.put("/api/business-profile", async (req, res) => {
     }
 });
 app.get("/api/clients", async (req, res) => res.json((await db
-    .prepare(`SELECT c.*, COUNT(i.id) AS invoice_count, COALESCE(SUM(CASE WHEN i.status != 'Paid' THEN i.amount ELSE 0 END), 0) AS outstanding FROM clients c LEFT JOIN invoices i ON i.client_id = c.id WHERE ${accessibleScopeClause('c', 'created_by_user_id')} GROUP BY c.id ORDER BY c.name`)
+    .prepare(`SELECT c.*, COUNT(i.id) AS invoice_count, COALESCE(SUM(CASE WHEN i.status IN ('Sent', 'Overdue') THEN CASE WHEN i.amount > COALESCE(payment_totals.paid_amount, 0) THEN i.amount - COALESCE(payment_totals.paid_amount, 0) ELSE 0 END ELSE 0 END), 0) AS outstanding FROM clients c LEFT JOIN invoices i ON i.client_id = c.id LEFT JOIN (SELECT invoice_id, SUM(amount) AS paid_amount FROM payments GROUP BY invoice_id) payment_totals ON payment_totals.invoice_id = i.id WHERE ${accessibleScopeClause('c', 'created_by_user_id')} GROUP BY c.id ORDER BY c.name`)
     .all(...accessibleScopeParameters(req.user))).map(decryptClient)));
 app.get("/api/clients/:id/invoices", async (req, res) => res.json((await db
     .prepare(`SELECT i.* FROM invoices i JOIN clients c ON c.id = i.client_id WHERE i.client_id = ? AND ${accessibleScopeClause('c', 'created_by_user_id')} AND ${accessibleScopeClause('i')} ORDER BY i.id DESC`)
@@ -1434,19 +1443,38 @@ async function createPdf(invoice) {
         doc.end();
     });
 }
-app.get("/api/invoices/:id/pdf", async (req, res) => {
+const getAccessibleInvoicePdf = async (user, invoiceId) => {
     const invoice = decryptInvoice(await db
         .prepare(`SELECT i.*, c.address AS client_address FROM invoices i LEFT JOIN clients c ON c.id = i.client_id WHERE ${accessibleScopeClause('i')} AND i.id = ?`)
-        .get(...accessibleScopeParameters(req.user), req.params.id));
+        .get(...accessibleScopeParameters(user), invoiceId));
     if (!invoice)
+        return null;
+    const businessProfile = await getBusinessProfile(invoice.organization_id, invoice.user_id, invoice.business_profile_id);
+    return {
+        invoice,
+        pdf: await createPdf(invoice),
+        filename: invoicePdfFilename(businessProfile?.name, invoice.number),
+    };
+};
+app.get("/api/invoices/:id/preview", async (req, res) => {
+    const result = await getAccessibleInvoicePdf(req.user, req.params.id);
+    if (!result)
         return res.status(404).json({ error: "Invoice not found." });
-    const pdf = await createPdf(invoice);
+    res.set({
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `inline; filename="${result.filename}"`,
+    }).send(result.pdf);
+});
+app.get("/api/invoices/:id/pdf", async (req, res) => {
+    const result = await getAccessibleInvoicePdf(req.user, req.params.id);
+    if (!result)
+        return res.status(404).json({ error: "Invoice not found." });
     res
         .set({
         "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="${invoice.number}.pdf"`,
+        "Content-Disposition": `attachment; filename="${result.filename}"`,
     })
-        .send(pdf);
+        .send(result.pdf);
 });
 app.post('/api/invoices/preview/pdf', async (req, res) => {
     const invoice = { number: req.body.number || 'PREVIEW', client_name: req.body.clientName || 'Client', client_email: req.body.clientEmail || '', client_address: req.body.clientAddress || '', description: req.body.description || 'Line item', lineItems: req.body.lineItems || [], business: req.body.business || null, amount: Number(req.body.amount || 0), subtotal: Number(req.body.subtotal), discount: Number(req.body.discount), taxAmount: Number(req.body.taxAmount), taxName: req.body.taxName || 'Tax', taxRate: Number(req.body.taxRate || 0), currency: req.body.currency || 'USD', currencySymbol: req.body.currencySymbol || '', due_date: req.body.dueDate || null, created_at: new Date().toISOString(), payment_instructions: req.body.paymentInstructions || '' };

@@ -6,7 +6,7 @@ import { formatMoney, renderDetails } from '../modules/format.tsx';
 import { isMail } from '../modules/selectors.ts';
 import { calcInvoice, recurringSummary } from '../modules/invoiceMath.ts';
 import { go, render } from '../ui/render.tsx';
-import { save, downloadPreviewPdf, uploadInvoiceLogo, removeInvoiceLogo } from '../actions/invoices.ts';
+import { save, downloadPreviewPdf, uploadInvoiceLogo, removeInvoiceLogo, queueInvoiceDraftAutosave } from '../actions/invoices.ts';
 const dueOptions = [[0, 'On receipt'], [15, 'Net 15'], [30, 'Net 30'], [60, 'Net 60']];
 const frequencies = ['Weekly', 'Biweekly', 'Monthly', 'Quarterly', 'Yearly'];
 export function InvoiceEditor() {
@@ -19,10 +19,12 @@ export function InvoiceEditor() {
   const totals = calcInvoice(invoice);
   const update = (patch: Record<string, unknown>) => {
     Object.assign(invoice, patch);
+    queueInvoiceDraftAutosave();
     render();
   };
   const updateItem = (index: number, patch: Record<string, unknown>) => {
     Object.assign(invoice.lineItems[index], patch);
+    queueInvoiceDraftAutosave();
     render();
   };
   const removeItem = (index: number) => {
@@ -32,6 +34,7 @@ export function InvoiceEditor() {
       quantity: 1,
       unitPrice: 0
     });
+    queueInvoiceDraftAutosave();
     render();
   };
   return <div className="ed invoice-prototype-editor">
@@ -43,6 +46,7 @@ export function InvoiceEditor() {
           render();
           window.scrollTo?.(0, 0);
         }}>Preview</button>
+          <span className="mut" role="status" aria-live="polite">{appState.invoiceAutosaveStatus}</span>
           <button className="btn s" onClick={() => save('draft')}>Save draft</button>
           <details><summary className="btn">Save &amp; send ▾</summary>
             <div className="menu">
@@ -132,6 +136,7 @@ export function InvoiceEditor() {
           quantity: 1,
           unitPrice: 0
         });
+        queueInvoiceDraftAutosave();
         render();
       }}>+ Add line item</button>
         <div className="invoice-bottom-grid">

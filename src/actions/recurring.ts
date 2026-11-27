@@ -32,7 +32,7 @@ export const runRec = async recurringIndex => {
       if (!scheduleResponse.ok) throw new Error(savedSchedule.error || 'Unable to update recurring schedule')
       if (savedSchedule.status === 'completed') recurringService.st = 'Completed'
     }
-    state.invoices.push({ id: savedInvoice.id, number: savedInvoice.number, c: recurringService.c, a: Number(savedInvoice.amount), due: savedInvoice.due_date || '', s: savedInvoice.status || 'Draft', rec: 1, cur: savedInvoice.currency || 'USD', n: savedInvoice.payment_instructions || '' })
+    state.invoices.unshift({ id: savedInvoice.id, number: savedInvoice.number, c: recurringService.c, a: Number(savedInvoice.amount), due: savedInvoice.due_date || '', s: savedInvoice.status || 'Draft', rec: 1, cur: savedInvoice.currency || 'USD', n: savedInvoice.payment_instructions || '' })
     toast(savedInvoice.number + " created from schedule")
   } catch (error) { toast(error.message) }
 }

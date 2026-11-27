@@ -11,10 +11,13 @@ let lastRenderedView = '';
 
 const currentView = () => ({
   route: state.currentRoute,
-  invoiceTab: state.activeInvoiceTab
+  invoiceTab: state.activeInvoiceTab,
+  selectedClientId: state.selectedClientId || null,
+  invoiceClientId: state.invoiceClientId || null,
+  invoiceAnchorId: state.invoiceAnchorId || null,
 });
 
-const viewSignature = () => `${state.currentRoute}:${state.activeInvoiceTab || ''}`;
+const viewSignature = () => `${state.currentRoute}:${state.activeInvoiceTab || ''}:${state.selectedClientId || ''}:${state.invoiceClientId || ''}:${state.invoiceAnchorId || ''}`;
 
 const historyStateForCurrentView = () => ({
   ...(window.history.state || {}),
@@ -48,6 +51,9 @@ export const initializeBrowserNavigation = () => {
     isRestoringBrowserNavigation = true;
     state.currentRoute = previousView.route;
     state.activeInvoiceTab = previousView.invoiceTab || 'All';
+    state.selectedClientId = previousView.selectedClientId || null;
+    state.invoiceClientId = previousView.invoiceClientId || null;
+    state.invoiceAnchorId = previousView.invoiceAnchorId || null;
     resetTransientNavigationState();
     render();
     isRestoringBrowserNavigation = false;
@@ -58,6 +64,9 @@ export const initializeBrowserNavigation = () => {
 export const go = (route: any, invoiceTab: any = undefined) => {
   state.currentRoute = route;
   if (invoiceTab) state.activeInvoiceTab = invoiceTab;
+  state.selectedClientId = null;
+  state.invoiceClientId = null;
+  state.invoiceAnchorId = null;
   resetTransientNavigationState();
   render();
   window.scrollTo?.(0, 0);
